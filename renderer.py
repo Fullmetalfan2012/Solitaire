@@ -4,7 +4,7 @@ import pygame
 from typing import TYPE_CHECKING, Dict, List, Optional
 from constants import (
     GREEN_FELT, DARKER_GREEN, WHITE, BLACK, SCREEN_WIDTH, SCREEN_HEIGHT,
-    BACKGROUND_COLORS, GRADIENTS
+    BACKGROUND_COLORS, GRADIENTS, PILE_OUTLINE_COLORS
 )
 
 if TYPE_CHECKING:
@@ -29,6 +29,8 @@ class Renderer:
         self.game_state = game_state
         self.background_color = GREEN_FELT
         self.background_name = 'green'  # Current background setting
+        self.pile_outline_color = DARKER_GREEN  # Default pile outline color
+        self.pile_outline_name = 'green'  # Current pile outline setting
         self.font = pygame.font.Font(None, 48)
         self.small_font = pygame.font.Font(None, 24)
 
@@ -46,6 +48,19 @@ class Renderer:
         elif background_name.startswith('gradient_'):
             # For gradients, we'll use a default solid color as fallback
             self.background_color = (50, 50, 50)
+
+    def set_pile_outline_color(self, color_name: str):
+        """
+        Set the pile outline color by name.
+
+        Args:
+            color_name: Name from PILE_OUTLINE_COLORS dict
+        """
+        self.pile_outline_name = color_name
+        if color_name in PILE_OUTLINE_COLORS:
+            self.pile_outline_color = PILE_OUTLINE_COLORS[color_name]
+        else:
+            self.pile_outline_color = DARKER_GREEN  # Fallback to default
 
     def _draw_background(self):
         """Draw the background (solid or gradient)."""
@@ -120,8 +135,9 @@ class Renderer:
         """Draw rectangles and labels showing where empty piles are."""
         from pile import StockPile, WastePile, FoundationPile
 
-        outline_color = DARKER_GREEN
-        label_color = (100, 150, 100)  # Lighter green for labels
+        outline_color = self.pile_outline_color
+        # Calculate label color as a lighter version of outline color
+        label_color = tuple(min(255, c + 50) for c in outline_color)
 
         # Suit names for foundations (more compatible than Unicode symbols)
         suit_names = {
@@ -277,8 +293,8 @@ class Renderer:
         current_y = start_y + (end_y - start_y) * progress - arc_progress
 
         # Draw the card at animated position
-        card.rect.x = int(current_x)
-        card.rect.y = int(current_y)
+        # Update card position (cards don't have rect, only position tuple)
+        card.position = (int(current_x), int(current_y))
         card.draw(self.screen)
 
     def render_win_message(self):
@@ -621,8 +637,51 @@ class Renderer:
             # Store rect for click detection
             self.bg_swatch_rects[bg_key] = swatch_rect
 
+        # Pile outline color section
+        y_offset = 350
+        subtitle_pile = self.font.render("Empty Pile Color", True, WHITE)
+        subtitle_pile_rect = subtitle_pile.get_rect(center=(SCREEN_WIDTH // 2, y_offset))
+        self.screen.blit(subtitle_pile, subtitle_pile_rect)
+
+        # Pile outline color options
+        pile_options = [
+            ('green', 'Green', (0, 80, 0)),
+            ('white', 'White', (200, 200, 200)),
+            ('gold', 'Gold', (200, 170, 0)),
+            ('blue', 'Blue', (100, 150, 200)),
+            ('red', 'Red', (200, 100, 100)),
+        ]
+
+        y_offset = 410
+        pile_swatch_size = 60
+        pile_spacing = 120
+        pile_start_x = (SCREEN_WIDTH - (len(pile_options) * pile_spacing - (pile_spacing - pile_swatch_size))) // 2
+
+        # Store rects for click detection
+        self.pile_outline_rects = {}
+
+        for i, (pile_key, pile_name, color) in enumerate(pile_options):
+            x = pile_start_x + i * pile_spacing
+
+            # Draw swatch
+            pile_swatch_rect = pygame.Rect(x, y_offset, pile_swatch_size, pile_swatch_size)
+            pygame.draw.rect(self.screen, color, pile_swatch_rect)
+
+            # Draw border (gold if selected, white otherwise)
+            border_color = (255, 215, 0) if pile_key == self.pile_outline_name else WHITE
+            border_width = 4 if pile_key == self.pile_outline_name else 2
+            pygame.draw.rect(self.screen, border_color, pile_swatch_rect, border_width)
+
+            # Draw label
+            label = self.small_font.render(pile_name, True, WHITE)
+            label_rect = label.get_rect(center=(x + pile_swatch_size // 2, y_offset + pile_swatch_size + 20))
+            self.screen.blit(label, label_rect)
+
+            # Store rect for click detection
+            self.pile_outline_rects[pile_key] = pile_swatch_rect
+
         # Scoring factors section
-        y_offset = 420
+        y_offset = 540
         subtitle2 = self.font.render("Scoring Factors", True, WHITE)
         subtitle2_rect = subtitle2.get_rect(center=(SCREEN_WIDTH // 2, y_offset))
         self.screen.blit(subtitle2, subtitle2_rect)

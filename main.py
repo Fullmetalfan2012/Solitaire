@@ -40,6 +40,7 @@ class SolitaireGame:
 
         # Apply settings
         self.renderer.set_background(self.settings.get_background_color())
+        self.renderer.set_pile_outline_color(self.settings.get_pile_outline_color())
 
         # Update main menu based on save file existence
         self.menu_state.update_main_menu_options(GameState.save_exists())
@@ -215,7 +216,7 @@ class SolitaireGame:
 
     def handle_menu_click(self, pos):
         """Handle mouse click in menu."""
-        # Check for settings screen clicks (background and scoring mode)
+        # Check for settings screen clicks (background, pile outline, and scoring mode)
         if self.menu_state.current_screen == MenuScreen.SETTINGS:
             # Check background swatch clicks
             if hasattr(self.renderer, 'bg_swatch_rects'):
@@ -226,13 +227,25 @@ class SolitaireGame:
                         self.renderer.set_background(bg_key)
                         return
 
+            # Check pile outline color swatch clicks
+            if hasattr(self.renderer, 'pile_outline_rects'):
+                for pile_key, rect in self.renderer.pile_outline_rects.items():
+                    if rect.collidepoint(pos):
+                        # Set new pile outline color
+                        self.settings.set_pile_outline_color(pile_key)
+                        self.renderer.set_pile_outline_color(pile_key)
+                        return
+
             # Check scoring factor checkbox clicks
             if hasattr(self.renderer, 'scoring_factor_rects'):
                 for factor_key, rect in self.renderer.scoring_factor_rects.items():
                     if rect.collidepoint(pos):
                         # Toggle scoring factor
                         current_value = self.settings.get(factor_key, True)
-                        self.settings.set_scoring_factor(factor_key, not current_value)
+                        new_value = not current_value
+                        self.settings.set_scoring_factor(factor_key, new_value)
+                        # Update game_state immediately so renderer shows correct state
+                        setattr(self.game_state, factor_key, new_value)
                         return
 
             # Check purge button click

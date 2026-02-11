@@ -43,6 +43,15 @@ GRADIENTS = {
     'gradient_forest': ((20, 40, 30), (40, 80, 50)),       # Dark green to lighter green
 }
 
+# Pile outline colors for empty piles (theme-aware)
+PILE_OUTLINE_COLORS = {
+    'green': (0, 80, 0),          # Darker green (original)
+    'white': (200, 200, 200),     # Light grey/white
+    'gold': (200, 170, 0),        # Muted gold
+    'blue': (100, 150, 200),      # Light blue
+    'red': (200, 100, 100),       # Soft red
+}
+
 # Game settings
 FPS = 60
 

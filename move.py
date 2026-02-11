@@ -70,19 +70,66 @@ class Move:
         if self.revealed_card:
             self.revealed_card.face_up = False
 
-    def to_dict(self) -> dict:
+    def to_dict(self, all_piles: List['Pile']) -> dict:
         """
         Serialize move to dictionary for saving.
 
+        Args:
+            all_piles: List of all piles to use for pile indexing
+
         Returns:
-            Dictionary representation of move
+            Dictionary representation of move with pile indices and card identifiers
         """
         return {
-            'from_pile_id': id(self.from_pile),
-            'to_pile_id': id(self.to_pile),
-            'card_ids': [id(card) for card in self.cards],
-            'revealed_card_id': id(self.revealed_card) if self.revealed_card else None
+            'from_pile_index': all_piles.index(self.from_pile),
+            'to_pile_index': all_piles.index(self.to_pile),
+            'cards': [(card.rank, card.suit) for card in self.cards],
+            'card_states': self.card_states,
+            'revealed_card': (self.revealed_card.rank, self.revealed_card.suit) if self.revealed_card else None
         }
+
+    @classmethod
+    def from_dict(cls, data: dict, all_piles: List['Pile']) -> 'Move':
+        """
+        Deserialize move from dictionary.
+
+        Args:
+            data: Dictionary representation of move
+            all_piles: List of all piles to use for pile indexing
+
+        Returns:
+            Reconstructed Move object
+        """
+        from_pile = all_piles[data['from_pile_index']]
+        to_pile = all_piles[data['to_pile_index']]
+
+        # Find card objects by rank+suit
+        cards = []
+        for rank, suit in data['cards']:
+            # Search through all piles for matching card
+            found = False
+            for pile in all_piles:
+                for card in pile.cards:
+                    if card.rank == rank and card.suit == suit:
+                        cards.append(card)
+                        found = True
+                        break
+                if found:
+                    break
+
+        # Find revealed card if any
+        revealed_card = None
+        if data['revealed_card']:
+            rev_rank, rev_suit = data['revealed_card']
+            for pile in all_piles:
+                for card in pile.cards:
+                    if card.rank == rev_rank and card.suit == rev_suit:
+                        revealed_card = card
+                        break
+                if revealed_card:
+                    break
+
+        return cls(from_pile, to_pile, cards, revealed_card, data.get('card_states'))
 
     def __repr__(self) -> str:
         """String representation for debugging."""

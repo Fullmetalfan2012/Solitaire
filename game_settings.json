@@ -1,4 +1,8 @@
 {
   "background_color": "gradient_sunset",
+  "pile_outline_color": "gold",
+  "time_enabled": true,
+  "moves_enabled": true,
+  "values_enabled": true,
   "scoring_mode": "TMV"
 }

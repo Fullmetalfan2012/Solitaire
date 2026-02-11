@@ -726,6 +726,8 @@ class GameState:
                 'waste': self._serialize_pile(self.waste),
                 'foundations': [self._serialize_pile(f) for f in self.foundations],
                 'tableaus': [self._serialize_pile(t) for t in self.tableaus],
+                'move_history': [move.to_dict(self.all_piles) for move in self.move_history],
+                'current_move_index': self.current_move_index,
                 'saved_at': time.time()
             }
 
@@ -779,6 +781,18 @@ class GameState:
 
             # Rebuild all_piles list
             self.all_piles = [self.stock, self.waste] + self.foundations + self.tableaus
+
+            # Restore move history (with backward compatibility)
+            if 'move_history' in save_data:
+                self.move_history = [
+                    Move.from_dict(move_data, self.all_piles)
+                    for move_data in save_data['move_history']
+                ]
+                self.current_move_index = save_data.get('current_move_index', 0)
+            else:
+                # Old save files without move history
+                self.move_history = []
+                self.current_move_index = 0
 
             # Clear history and hints
             self.history = []

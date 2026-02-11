@@ -9,6 +9,7 @@ from constants import DEFAULT_SCORING_FACTORS
 # Default settings
 DEFAULT_SETTINGS = {
     'background_color': 'green',  # green, blue, grey, gradient_sunset, gradient_ocean, gradient_forest
+    'pile_outline_color': 'green',  # green, white, gold, blue, red
     'time_enabled': DEFAULT_SCORING_FACTORS['time_enabled'],
     'moves_enabled': DEFAULT_SCORING_FACTORS['moves_enabled'],
     'values_enabled': DEFAULT_SCORING_FACTORS['values_enabled'],
@@ -84,3 +85,11 @@ class Settings:
         """Toggle a scoring factor on/off."""
         if factor in ['time_enabled', 'moves_enabled', 'values_enabled']:
             self.set(factor, enabled)
+
+    def get_pile_outline_color(self) -> str:
+        """Get current pile outline color setting."""
+        return self.settings.get('pile_outline_color', 'green')
+
+    def set_pile_outline_color(self, color: str):
+        """Set pile outline color setting."""
+        self.set('pile_outline_color', color)
