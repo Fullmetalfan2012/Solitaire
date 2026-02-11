@@ -1,11 +1,13 @@
 """Main game loop for Pygame Solitaire."""
 
 import pygame
+import time
 from card import Card
 from game_state import GameState
 from renderer import Renderer
 from input_handler import InputHandler
 from stats import StatsTracker
+from settings import Settings
 from menu_state import MenuState, MenuScreen
 from constants import SCREEN_WIDTH, SCREEN_HEIGHT, FPS
 
@@ -33,7 +35,11 @@ class SolitaireGame:
         self.renderer = Renderer(self.screen, self.game_state)
         self.input_handler = InputHandler(self.game_state)
         self.stats_tracker = StatsTracker()
+        self.settings = Settings()
         self.menu_state = MenuState()
+
+        # Apply settings
+        self.renderer.set_background(self.settings.get_background_color())
 
         # Update main menu based on save file existence
         self.menu_state.update_main_menu_options(GameState.save_exists())
@@ -86,6 +92,10 @@ class SolitaireGame:
                         # Clear hint highlights after move
                         self.game_state.clear_hints()
 
+                        # Check if auto-finish is available
+                        if not self.game_state.auto_finishing:
+                            self.game_state.auto_finish_available = self.game_state.check_auto_finish_available()
+
                         # Check if game is won after the move
                         if self.game_state.check_win():
                             self.game_won = True
@@ -109,6 +119,35 @@ class SolitaireGame:
         # Update sage advice timer
         self.game_state.update_sage_advice()
 
+        # Update snap-back animation
+        self.input_handler.update_snap_back()
+
+        # Handle auto-finish animation
+        if self.game_state.auto_finishing and not self.game_won:
+            # Check if current move animation is complete (0.3s per move)
+            if self.game_state.auto_finish_card:
+                elapsed = time.time() - self.game_state.auto_finish_start_time
+                if elapsed > 0.3:  # Animation duration
+                    # Complete the move
+                    self.game_state.complete_auto_finish_move()
+
+                    # Check if game is won
+                    if self.game_state.check_win():
+                        self.game_state.auto_finishing = False
+                        self.game_won = True
+                        self.entering_name = True
+                        self.player_name = ""
+                        self.final_score = self.game_state.calculate_final_score()
+                    else:
+                        # Start next move
+                        if not self.game_state.start_auto_finish_move():
+                            # No more moves but not won? (shouldn't happen)
+                            self.game_state.auto_finishing = False
+            else:
+                # Start first move
+                if not self.game_state.start_auto_finish_move():
+                    self.game_state.auto_finishing = False
+
     def render(self):
         """Render the game."""
         if self.entering_name:
@@ -118,8 +157,8 @@ class SolitaireGame:
             # Render game
             self.renderer.render(self.input_handler)
         else:
-            # Render menu
-            self.renderer.render_menu(self.menu_state, self.stats_tracker)
+            # Render menu (pass input_handler for pause menu to show game underneath)
+            self.renderer.render_menu(self.menu_state, self.stats_tracker, self.input_handler)
 
     def handle_game_keyboard(self, event):
         """Handle keyboard input during gameplay."""
@@ -139,12 +178,24 @@ class SolitaireGame:
         elif event.key == pygame.K_u:
             # Undo last move
             if self.game_state.undo():
-                print(f"Undo successful! ({self.game_state.get_undo_count()} undos remaining)")
+                print(f"Undo successful! ({self.game_state.get_undo_count()} undos, {self.game_state.get_redo_count()} redos available)")
             else:
-                print("No more undos available")
+                print("No moves to undo")
+        elif event.key == pygame.K_y and (pygame.key.get_mods() & pygame.KMOD_CTRL):
+            # Redo next move (Ctrl+Y)
+            if self.game_state.redo():
+                print(f"Redo successful! ({self.game_state.get_undo_count()} undos, {self.game_state.get_redo_count()} redos available)")
+            else:
+                print("No moves to redo")
         elif event.key == pygame.K_r:
             # Reset game
             self.reset_game()
+        elif event.key == pygame.K_f:
+            # Start auto-finish if available
+            if self.game_state.auto_finish_available and not self.game_state.auto_finishing:
+                self.game_state.auto_finishing = True
+                self.game_state.auto_finish_available = False
+                print("Auto-finish started!")
 
     def handle_menu_keyboard(self, event):
         """Handle keyboard input in menus."""
@@ -164,6 +215,37 @@ class SolitaireGame:
 
     def handle_menu_click(self, pos):
         """Handle mouse click in menu."""
+        # Check for settings screen clicks (background and scoring mode)
+        if self.menu_state.current_screen == MenuScreen.SETTINGS:
+            # Check background swatch clicks
+            if hasattr(self.renderer, 'bg_swatch_rects'):
+                for bg_key, rect in self.renderer.bg_swatch_rects.items():
+                    if rect.collidepoint(pos):
+                        # Set new background
+                        self.settings.set_background_color(bg_key)
+                        self.renderer.set_background(bg_key)
+                        return
+
+            # Check scoring factor checkbox clicks
+            if hasattr(self.renderer, 'scoring_factor_rects'):
+                for factor_key, rect in self.renderer.scoring_factor_rects.items():
+                    if rect.collidepoint(pos):
+                        # Toggle scoring factor
+                        current_value = self.settings.get(factor_key, True)
+                        self.settings.set_scoring_factor(factor_key, not current_value)
+                        return
+
+            # Check purge button click
+            if hasattr(self.renderer, 'purge_button_rect'):
+                if self.renderer.purge_button_rect.collidepoint(pos):
+                    # Purge all scores
+                    if self.stats_tracker.purge_all_scores():
+                        print("All scores have been purged!")
+                    else:
+                        print("Failed to purge scores!")
+                    return
+
+        # Check for menu button clicks
         if not hasattr(self.menu_state, 'button_rects'):
             return
 
@@ -212,6 +294,11 @@ class SolitaireGame:
     def start_new_game(self):
         """Start a new game."""
         self.game_state.initialize_game()
+        # Apply scoring factors from settings
+        factors = self.settings.get_scoring_factors()
+        self.game_state.time_enabled = factors['time_enabled']
+        self.game_state.moves_enabled = factors['moves_enabled']
+        self.game_state.values_enabled = factors['values_enabled']
         self.input_handler = InputHandler(self.game_state)
         self.game_won = False
         self.entering_name = False
@@ -250,10 +337,16 @@ class SolitaireGame:
             event: Pygame KEYDOWN event
         """
         if event.key == pygame.K_RETURN and len(self.player_name) == 3:
-            # Save score and reset game
+            # Save score and return to main menu
             self.stats_tracker.save_score(self.player_name, self.final_score)
             print(f"\nScore saved! {self.player_name}: {self.final_score['total']:,} points")
-            self.reset_game()
+
+            # Clear win state and return to main menu
+            self.game_won = False
+            self.entering_name = False
+            self.player_name = ""
+            self.final_score = None
+            self.return_to_main_menu()
 
         elif event.key == pygame.K_BACKSPACE and len(self.player_name) > 0:
             # Delete last character
@@ -267,6 +360,11 @@ class SolitaireGame:
     def reset_game(self):
         """Reset the game to initial state."""
         self.game_state.initialize_game()
+        # Apply scoring factors from settings
+        factors = self.settings.get_scoring_factors()
+        self.game_state.time_enabled = factors['time_enabled']
+        self.game_state.moves_enabled = factors['moves_enabled']
+        self.game_state.values_enabled = factors['values_enabled']
         self.input_handler = InputHandler(self.game_state)
         self.game_won = False
         self.entering_name = False

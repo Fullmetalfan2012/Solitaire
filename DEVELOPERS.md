@@ -24,19 +24,21 @@ This guide is optimized for developers working on Phase 3 (special abilities) an
 
 ### Module Structure
 
-The codebase is organized into 7 core modules plus supporting files:
+The codebase is organized into 11 core modules plus supporting files:
 
 ```
 solitaire/
-├── constants.py          # All configuration values
-├── card.py              # Card data structure
-├── pile.py              # Pile hierarchy (4 types)
+├── constants.py          # All configuration values (colors, positions, scoring factors)
+├── card.py              # Card data structure with ability hooks
+├── pile.py              # Pile hierarchy (4 types: Stock, Waste, Foundation, Tableau)
+├── move.py              # Move tracking for undo/redo (Command Pattern)
 ├── game_state.py        # Game logic orchestrator
-├── input_handler.py     # Drag-and-drop state machine
-├── renderer.py          # All drawing logic
+├── input_handler.py     # Drag-and-drop with overlap detection
+├── renderer.py          # All drawing logic (game, menus, animations)
+├── settings.py          # User settings persistence (background, scoring factors)
 ├── main.py              # Game loop coordinator
 ├── menu_state.py        # Menu navigation
-└── stats.py             # Statistics tracking
+└── stats.py             # Statistics tracking (per-mode leaderboards)
 ```
 
 ### Design Philosophy
@@ -45,9 +47,89 @@ solitaire/
 
 **Pile-Based Rules**: Game rules are encoded in pile classes via `can_accept()`. This makes rules explicit, testable, and modifiable.
 
-**State Snapshots**: The undo system uses deep copies of game state. This same mechanism powers save/load and can be extended for replay, analytics, or debugging.
+**Move Tracking (Command Pattern)**: The undo/redo system uses lightweight Move objects instead of state snapshots. Each move knows how to execute and undo itself. This enables unlimited undo/redo, smaller save files, and future replay functionality.
+
+**Settings-Driven Behavior**: Game configuration (background color, scoring mode) is stored in `settings.py` and persisted to JSON. This makes the game customizable without code changes.
 
 **Extension Points**: The Card class has `special_suit_ability` and `special_rank_ability` properties specifically designed for Phase 3.
+
+---
+
+## Phase 2 Systems (Current Features)
+
+### Unlimited Undo/Redo System
+
+**Architecture**: Command Pattern with move tracking
+- Each move is stored as a lightweight `Move` object (~100 bytes)
+- `move_history` stores all moves, `current_move_index` tracks position
+- Undo: decrement index, call `move.undo()`
+- Redo: increment index, call `move.execute()`
+- New moves clear any "future" redo history
+
+**Memory**: 33-66x less memory than deepcopy snapshots (was 3KB per state, now 100 bytes per move)
+
+**Key Files**: `move.py`, `game_state.py` (undo/redo methods)
+
+### Toggle-Based Scoring System
+
+**Architecture**: Players independently enable/disable three scoring factors:
+- **Time Bonus**: Rewards fast completion (15,000 base minus elapsed time)
+- **Move Penalty**: Penalizes inefficient play (points deducted per move)
+- **Move Values**: Awards points for cards moved to foundations
+
+**8 Possible Modes** (2³ combinations):
+- All three enabled: "Time + Moves + Values" (hardest, highest scores)
+- Two enabled: "Time + Moves", "Time + Values", "Moves + Values"
+- One enabled: "Time Only", "Moves Only", "Values Only"
+- None enabled: "Complete Only" (just track wins, no scoring)
+
+**Dynamic Mode Naming**: `get_scoring_mode_name()` generates display names based on enabled factors
+
+**Separate Leaderboards**: Each combination has its own high score table in `scores.jsonl`
+
+**Settings Persistence**: Saved to `game_settings.json` as three boolean flags
+
+**Extending**: To add new scoring factors, modify:
+1. Add boolean flag to `game_state.py` (e.g., `self.combo_enabled`)
+2. Update `get_current_score()` to conditionally calculate the new factor
+3. Add to `get_scoring_mode_name()` function
+4. Add checkbox to settings UI in `renderer.py`
+
+**Key Files**: `constants.py` (get_scoring_mode_name), `settings.py` (persistence), `stats.py` (per-mode leaderboards), `game_state.py` (scoring logic)
+
+### Auto-Finish System
+
+**Detection**: Triggers when all tableau cards are face-up and stock/waste are empty
+- Method: `game_state.check_auto_finish_available()`
+- Button appears at bottom center
+
+**Animation**: Cards fly to foundations in sequence with arc trajectory (0.3s per card)
+- Updates in `main.py → update()` every frame
+- Animation rendering in `renderer.py → _draw_auto_finish_animation()`
+
+**Trigger**: Press F or click "Auto-Finish" button
+
+**Key Files**: `game_state.py` (detection, move finding), `renderer.py` (UI/animation), `main.py` (update loop)
+
+### Card-Based Overlap Snapping
+
+**Algorithm**: 1/3 overlap threshold
+1. Get dragged card rect
+2. Check overlap with all pile rects
+3. If overlap >= 33% of card area, that pile is a candidate
+4. Return pile with **most** overlap
+
+**Extended Hitboxes**: Tableau pile rects extend to cover entire visible stack
+
+**Why Better**: More forgiving than mouse-based snapping. Players can release near pile edges.
+
+**Key Files**: `input_handler.py` (_find_target_pile_by_overlap, _get_effective_pile_rect)
+
+### Smooth Animations
+
+**Snap-Back**: 200ms ease-out cubic when cards dropped in invalid zones
+**Auto-Finish**: 300ms arc animation per card
+**Both**: Run in `main.py → update()` every frame for smooth 60fps
 
 ---
 

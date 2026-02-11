@@ -8,9 +8,10 @@ import os
 from typing import List, Optional, Dict, Any
 from card import Card
 from pile import Pile, StockPile, WastePile, FoundationPile, TableauPile
+from move import Move
 from constants import (
     STOCK_POS, WASTE_POS, FOUNDATION_START, FOUNDATION_SPACING,
-    TABLEAU_START, TABLEAU_SPACING
+    TABLEAU_START, TABLEAU_SPACING, get_scoring_mode_name
 )
 
 
@@ -42,15 +43,28 @@ class GameState:
             'time_bonus_base': 15000
         }
 
-        # Undo/redo system (stores last 3 states)
-        self.history: List[Dict[str, Any]] = []
-        self.max_history: int = 3
+        # Undo/redo system using move tracking (unlimited undo/redo)
+        self.move_history: List[Move] = []
+        self.current_move_index: int = 0  # Points to next move to make (for redo)
+
+        # Scoring factors (toggleable)
+        self.time_enabled: bool = True
+        self.moves_enabled: bool = True
+        self.values_enabled: bool = True
 
         # Hint system
         self.hints_remaining: int = 3
         self.hint_targets: List[Pile] = []  # Piles to highlight
         self.sage_advice_text: Optional[str] = None
         self.sage_advice_timer: float = 0.0
+
+        # Auto-finish system
+        self.auto_finish_available: bool = False
+        self.auto_finishing: bool = False
+        self.auto_finish_card: Optional[Card] = None
+        self.auto_finish_source: Optional[Pile] = None
+        self.auto_finish_target: Optional[Pile] = None
+        self.auto_finish_start_time: float = 0.0
 
     def initialize_game(self):
         """Set up a new game with shuffled deck."""
@@ -59,8 +73,9 @@ class GameState:
         self.move_count = 0
         self.move_value_score = 0
 
-        # Clear undo history
-        self.history = []
+        # Clear move history
+        self.move_history = []
+        self.current_move_index = 0
 
         # Reset hint system
         self.hints_remaining = 3
@@ -139,21 +154,37 @@ class GameState:
         If stock has cards, draw one to waste.
         If stock is empty, recycle waste back to stock.
         """
-        # Save state before stock action (for undo)
-        self.save_state()
-
         if self.stock.cards:
             # Draw card from stock to waste
             card = self.stock.draw_card()
             if card:
                 self.waste.add_card(card)
-            # Note: Drawing from stock doesn't count as a move
+                # Create move for undo/redo (single card from stock to waste)
+                # Clear any "future" moves
+                if self.current_move_index < len(self.move_history):
+                    self.move_history = self.move_history[:self.current_move_index]
+                move = Move(self.stock, self.waste, [card], None)
+                self.move_history.append(move)
+                self.current_move_index = len(self.move_history)
+            # Note: Drawing from stock doesn't count as a scored move
         else:
             # Recycle waste back to stock
+            cards_to_recycle = list(self.waste.cards)  # Copy list before clearing
+            card_states = [card.face_up for card in cards_to_recycle]  # Store states before flipping
+
             while self.waste.cards:
                 card = self.waste.cards.pop()
                 card.face_up = False
                 self.stock.add_card(card)
+
+            # Create move for undo/redo (all cards from waste to stock, with original states)
+            # Clear any "future" moves
+            if self.current_move_index < len(self.move_history):
+                self.move_history = self.move_history[:self.current_move_index]
+            move = Move(self.waste, self.stock, cards_to_recycle, None, card_states)
+            self.move_history.append(move)
+            self.current_move_index = len(self.move_history)
+
             # Record the recycle action (penalty)
             self.record_stock_action(recycled=True)
 
@@ -177,21 +208,29 @@ class GameState:
         if not target.can_accept(cards[0], source):
             return False
 
-        # Save state before making the move (for undo)
-        self.save_state()
-
         # Execute the move
         for card in cards:
             source.remove_card(card)
             target.add_card(card)
 
-        # Check if we flipped a card (for scoring)
-        flipped_card = False
+        # Check if we flipped a card
+        revealed_card = None
         if isinstance(source, TableauPile):
-            flipped_card = source.flip_top_card()
+            if source.flip_top_card():
+                # A card was flipped - track it for undo
+                revealed_card = source.cards[-1] if source.cards else None
+
+        # Create and store move for undo/redo
+        # Clear any "future" moves if we're in the middle of history
+        if self.current_move_index < len(self.move_history):
+            self.move_history = self.move_history[:self.current_move_index]
+
+        move = Move(source, target, cards, revealed_card)
+        self.move_history.append(move)
+        self.current_move_index = len(self.move_history)
 
         # Record the move for scoring
-        self.record_move(source, target, cards, flipped_card)
+        self.record_move(source, target, cards, revealed_card is not None)
 
         return True
 
@@ -205,6 +244,65 @@ class GameState:
             True if game is won
         """
         return all(len(foundation.cards) == 13 for foundation in self.foundations)
+
+    def check_auto_finish_available(self) -> bool:
+        """
+        Check if auto-finish is available.
+
+        Auto-finish is available when all tableau cards are face-up and
+        all remaining moves are to foundations (no decisions needed).
+
+        Returns:
+            True if auto-finish should be offered
+        """
+        # All tableau cards must be face-up
+        for tableau in self.tableaus:
+            for card in tableau.cards:
+                if not card.face_up:
+                    return False
+
+        # Stock and waste must be empty (or we'd need to draw)
+        if self.stock.cards or self.waste.cards:
+            return False
+
+        # If we get here, all cards are visible and accessible
+        # Only foundation moves remain - offer auto-finish!
+        return True
+
+    def start_auto_finish_move(self) -> bool:
+        """
+        Find and start animating the next auto-finish move.
+
+        Returns:
+            True if a move was found, False if complete
+        """
+        # Look for any card that can go to foundation
+        for tableau in self.tableaus:
+            if tableau.cards:
+                top_card = tableau.cards[-1]
+                # Try each foundation
+                for foundation in self.foundations:
+                    if foundation.can_accept(top_card, tableau):
+                        # Start animation
+                        self.auto_finish_card = top_card
+                        self.auto_finish_source = tableau
+                        self.auto_finish_target = foundation
+                        self.auto_finish_start_time = time.time()
+                        return True
+
+        # No more moves - complete!
+        return False
+
+    def complete_auto_finish_move(self):
+        """Complete the current auto-finish move (called after animation)."""
+        if self.auto_finish_card and self.auto_finish_source and self.auto_finish_target:
+            # Execute the move
+            self.try_move([self.auto_finish_card], self.auto_finish_source, self.auto_finish_target)
+
+            # Clear animation state
+            self.auto_finish_card = None
+            self.auto_finish_source = None
+            self.auto_finish_target = None
 
     def get_pile_at(self, pos: tuple) -> Optional[Pile]:
         """
@@ -322,27 +420,33 @@ class GameState:
 
     def get_current_score(self) -> Dict[str, any]:
         """
-        Calculate current score with all components.
+        Calculate current score based on enabled scoring factors.
 
         Returns:
-            Dictionary with score components and total
+            Dictionary with score components, total, and mode info
         """
         elapsed = self.get_elapsed_time()
 
-        # Time component (bonus for fast play)
+        # Time component (bonus for fast play) - only if enabled
         time_score = 0
-        if self.scoring_config['time_enabled']:
+        if self.time_enabled and self.scoring_config['time_enabled']:
             time_bonus_base = self.scoring_config['time_bonus_base']
             time_multiplier = self.scoring_config['time_multiplier']
             time_score = max(0, time_bonus_base - int(elapsed * time_multiplier))
 
-        # Move efficiency penalty
+        # Move efficiency penalty - only if enabled
         move_penalty = 0
-        if self.scoring_config['moves_enabled']:
+        if self.moves_enabled and self.scoring_config['moves_enabled']:
             move_penalty = self.move_count * self.scoring_config['move_penalty']
 
+        # Card value score - only if enabled
+        value_score = self.move_value_score if self.values_enabled else 0
+
         # Calculate total
-        total_score = self.move_value_score + time_score - move_penalty
+        total_score = value_score + time_score - move_penalty
+
+        # Generate scoring mode name
+        mode_name = get_scoring_mode_name(self.time_enabled, self.moves_enabled, self.values_enabled)
 
         return {
             'total': max(0, total_score),  # Never negative
@@ -350,7 +454,11 @@ class GameState:
             'time_bonus': time_score,
             'move_penalty': move_penalty,
             'move_count': self.move_count,
-            'elapsed_time': elapsed
+            'elapsed_time': elapsed,
+            'scoring_mode': mode_name,  # Dynamic name based on enabled factors
+            'time_enabled': self.time_enabled,
+            'moves_enabled': self.moves_enabled,
+            'values_enabled': self.values_enabled,
         }
 
     def calculate_final_score(self) -> Dict[str, any]:
@@ -362,55 +470,57 @@ class GameState:
         """
         return self.get_current_score()
 
-    def save_state(self):
-        """
-        Save current game state to history for undo functionality.
-
-        Creates a deep copy snapshot of all piles and scoring data.
-        Maintains max of 3 states in history (oldest removed first).
-        """
-        state_snapshot = {
-            'stock': copy.deepcopy(self.stock),
-            'waste': copy.deepcopy(self.waste),
-            'foundations': copy.deepcopy(self.foundations),
-            'tableaus': copy.deepcopy(self.tableaus),
-            'move_count': self.move_count,
-            'move_value_score': self.move_value_score,
-            'start_time': self.start_time  # Keep same start time
-        }
-
-        self.history.append(state_snapshot)
-
-        # Keep only last 3 states
-        if len(self.history) > self.max_history:
-            self.history.pop(0)
-
     def undo(self) -> bool:
         """
-        Restore previous game state from history.
+        Undo the last move using move tracking.
 
         Returns:
-            True if undo was successful, False if no history available
+            True if undo was successful, False if no moves to undo
         """
-        if not self.history:
+        if self.current_move_index == 0:
             return False
 
-        # Pop the most recent state
-        state_snapshot = self.history.pop()
+        # Decrement index to point to move to undo
+        self.current_move_index -= 1
 
-        # Restore all piles
-        self.stock = state_snapshot['stock']
-        self.waste = state_snapshot['waste']
-        self.foundations = state_snapshot['foundations']
-        self.tableaus = state_snapshot['tableaus']
+        # Get the move to undo
+        move = self.move_history[self.current_move_index]
 
-        # Restore scoring data
-        self.move_count = state_snapshot['move_count']
-        self.move_value_score = state_snapshot['move_value_score']
-        self.start_time = state_snapshot['start_time']
+        # Undo the move
+        move.undo()
 
-        # Rebuild all_piles list
-        self.all_piles = [self.stock, self.waste] + self.foundations + self.tableaus
+        # Update card positions for rendering
+        for pile in self.all_piles:
+            pile.update_card_positions()
+
+        # Decrement move count (if it was a scored move, not stock draw)
+        # We'll need to track this better, but for now just decrement if > 0
+        if self.move_count > 0:
+            self.move_count -= 1
+
+        return True
+
+    def redo(self) -> bool:
+        """
+        Redo the next move using move tracking.
+
+        Returns:
+            True if redo was successful, False if no moves to redo
+        """
+        if self.current_move_index >= len(self.move_history):
+            return False
+
+        # Get the move to redo
+        move = self.move_history[self.current_move_index]
+
+        # Re-execute the move
+        move.execute()
+
+        # Increment move count
+        self.move_count += 1
+
+        # Increment index
+        self.current_move_index += 1
 
         # Update card positions for rendering
         for pile in self.all_piles:
@@ -418,23 +528,41 @@ class GameState:
 
         return True
 
+    def can_redo(self) -> bool:
+        """
+        Check if redo is available.
+
+        Returns:
+            True if there are moves to redo
+        """
+        return self.current_move_index < len(self.move_history)
+
+    def get_redo_count(self) -> int:
+        """
+        Get number of redo operations available.
+
+        Returns:
+            Number of moves that can be redone
+        """
+        return len(self.move_history) - self.current_move_index
+
     def can_undo(self) -> bool:
         """
         Check if undo is available.
 
         Returns:
-            True if there are states in history
+            True if there are moves to undo
         """
-        return len(self.history) > 0
+        return self.current_move_index > 0
 
     def get_undo_count(self) -> int:
         """
         Get number of undo operations available.
 
         Returns:
-            Number of states in history (0-3)
+            Number of moves that can be undone
         """
-        return len(self.history)
+        return self.current_move_index
 
     def use_hint(self) -> bool:
         """
@@ -462,26 +590,103 @@ class GameState:
 
     def get_sage_advice(self) -> str:
         """
-        Get a strategic hint (unlimited, free advice).
+        Get sage advice (unlimited, comedic animal facts).
 
         Returns:
-            Random strategic advice text
+            Random useless animal wisdom
         """
         import random
 
         advice_pool = [
-            "Prioritize revealing face-down cards in tableau piles",
-            "Move Aces to foundations as soon as possible",
-            "Try to keep columns open for Kings",
-            "Build foundations evenly to maintain flexibility",
-            "Avoid moving cards to foundations too early if needed in tableau",
-            "Look for moves that create the most new options",
-            "Empty tableau columns are valuable - use them wisely",
-            "Check if drawing from stock reveals better moves",
-            "Sometimes it's better to wait before making a move",
-            "Plan several moves ahead when possible",
-            "Keep higher-ranked cards accessible in tableau",
-            "Balance building up foundations with revealing cards"
+            # Cat wisdom
+            "A cat's whisker is exactly as wide as its body",
+            "Cats sleep 70% of their lives - they're living the dream",
+            "Cats have three eyelids. You only have two. Think about that.",
+            "A group of cats is called a 'clowder'. This won't help you win.",
+            "Cats can rotate their ears 180 degrees. Solitaire cards cannot.",
+            "Ancient Egyptians worshipped cats. They didn't worship Solitaire players.",
+            "Cats have 32 muscles in each ear. You have 52 cards. Coincidence?",
+            "Cats can't taste sweetness. Much like this losing streak.",
+            "A cat's purr vibrates at 25-150 Hz. That's the frequency of your frustration.",
+            "Cats spend 30-50% of their day grooming. You spend that much staring at cards.",
+            "A cat's brain is 90% similar to a human's. They'd still play better.",
+            "Cats can jump up to 6 times their height. Your win rate can't jump at all.",
+            "A cat's meow is specifically for humans. This loss is specifically for you.",
+            "Cats have a third eyelid that shows when they're unwell. Check your strategy.",
+            "Cats can make over 100 vocal sounds. You're making sounds of defeat.",
+            "A cat's jaw can't move sideways. Neither can your progress in this game.",
+            "Cats' collarbones don't connect to other bones. Your cards don't connect either.",
+            "Cats have fewer toes on their back paws than front. Asymmetry, like your luck.",
+            "A cat's heart beats 110-140 times per minute. Faster with each wrong move.",
+            "Cats can run up to 30 mph. Still slower than your losing streak.",
+
+            # Dog wisdom
+            "Dogs have wet noses to absorb scent chemicals. This is irrelevant.",
+            "A dog's sense of smell is 40x better than yours. They'd still lose at Solitaire.",
+            "Dalmatians are born completely white. Just like your winning chances.",
+            "Dogs can hear sounds four times farther than humans. They still can't help you.",
+            "A dog's nose print is unique, like a fingerprint. Unlike your strategy.",
+            "Puppies are born deaf, blind, and toothless. Sound familiar?",
+            "Dogs have three eyelids. One more than your viable moves.",
+            "A dog's shoulder blades are unattached. Like your grip on this game.",
+            "Dogs can smell your feelings. Right now? Desperation.",
+            "Greyhounds can beat cheetahs in long-distance races. You can't beat anything.",
+            "Dogs have 18 muscles in each ear. You have 52 cards you can't play.",
+            "A dog's sense of time is based on routine. Your routine is losing.",
+            "Dogs dream just like humans. They dream of better Solitaire players.",
+            "Dogs have 42 adult teeth. You have 42 problems and this game is all of them.",
+            "A dog can locate a sound in 6/100ths of a second. You can't find a move in 6 minutes.",
+            "Dogs' paws smell like corn chips. Your strategy smells like despair.",
+            "Service dogs can predict seizures. They predict you'll lose this game.",
+            "Dogs have a 'third eyelid' for protection. You need protection from this game.",
+            "Bloodhounds can track scents over 300 hours old. Your mistakes are fresher.",
+            "Dogs sweat through their paws. You're sweating through everything else.",
+
+            # Bird wisdom
+            "Hummingbirds can fly backwards. Your undo button does the same thing.",
+            "Owls can't move their eyeballs. At least you can look away from this mess.",
+            "Ostriches have the largest eyes of any land animal. They'd see this coming.",
+            "Crows can recognize human faces. They're judging your moves right now.",
+            "Penguins propose with pebbles. You're proposing nothing but chaos.",
+            "Pigeons can do math. They're laughing at your card counting.",
+            "Hummingbirds' hearts beat 1,200 times per minute. Yours beats in panic.",
+            "Owls can rotate their heads 270 degrees. You can't rotate your luck 1 degree.",
+            "Penguins can hold their breath for 20 minutes. You should try holding this game.",
+            "Crows can hold grudges for years. This game holds grudges for seconds.",
+            "A woodpecker pecks 20 times per second. That's how often you make mistakes.",
+            "Chickens can remember over 100 faces. They remember your failures.",
+            "Parrots can live to 80 years. This game feels like it's taken that long.",
+            "Eagles can see 8 times farther than humans. They see no hope for you.",
+            "Flamingos can sleep standing on one leg. You can't win standing on two.",
+            "Ostriches can run 45 mph. Your winning chances run even faster away.",
+            "Albatrosses can fly for years without landing. Your losing streak also never lands.",
+            "Robins can detect worms by sound. You can't detect winning moves by sight.",
+            "Peacocks' tail feathers can reach 5 feet. Your card stacks reach nowhere.",
+            "Swifts spend 10 months flying without landing. You spend months without winning.",
+            "Kiwi birds are flightless and nearly blind. They'd still beat you.",
+
+            # Mouse wisdom
+            "Mice can fit through holes the size of a pencil. You can't fit through this puzzle.",
+            "A mouse's heart beats 632 times per minute. Yours might too, with this game.",
+            "Mice are excellent jumpers and climbers. Cards aren't. That's your problem.",
+            "A mouse can live without water longer than a camel. Still shorter than this game.",
+            "Mice whiskers detect changes in air flow. Your losing streak changes nothing.",
+            "Mice teeth never stop growing. Neither does your card pile, apparently.",
+            "Mice can squeeze through a hole the size of a dime. You can't squeeze out a win.",
+            "A mouse's tail is as long as its body. Your game is as long as your patience.",
+            "Mice are nocturnal. Your winning chances are also in the dark.",
+            "House mice can run up to 8 mph. Your progress moves backwards.",
+            "Mice can fall 8 feet without injury. You fall at every move without help.",
+            "A mouse's heart rate can reach 840 bpm when stressed. Relatable, isn't it?",
+            "Mice are omnivores. Your strategy is omni-terrible.",
+            "Mice have poor eyesight but great hearing. You have neither for this game.",
+            "A mouse's pregnancy lasts 19-21 days. This game feels longer.",
+            "Mice can sense temperature changes through whiskers. Feel that chill? It's defeat.",
+            "Mice are social creatures living in groups. You're alone in this struggle.",
+            "Mice can swim for up to 3 days. You're drowning in cards already.",
+            "A mouse can produce 50-60 offspring per year. Your mistakes multiply faster.",
+            "Mice groom themselves for hours daily. No amount of grooming will fix this mess.",
+            "Mice communicate through ultrasonic vocalizations. Your sighs are more audible."
         ]
 
         return random.choice(advice_pool)
@@ -514,6 +719,9 @@ class GameState:
                 'move_value_score': self.move_value_score,
                 'hints_remaining': self.hints_remaining,
                 'scoring_config': self.scoring_config,
+                'time_enabled': self.time_enabled,
+                'moves_enabled': self.moves_enabled,
+                'values_enabled': self.values_enabled,
                 'stock': self._serialize_pile(self.stock),
                 'waste': self._serialize_pile(self.waste),
                 'foundations': [self._serialize_pile(f) for f in self.foundations],
@@ -552,6 +760,10 @@ class GameState:
             self.move_value_score = save_data['move_value_score']
             self.hints_remaining = save_data['hints_remaining']
             self.scoring_config = save_data['scoring_config']
+            # Restore scoring factors (with defaults for backward compatibility)
+            self.time_enabled = save_data.get('time_enabled', True)
+            self.moves_enabled = save_data.get('moves_enabled', True)
+            self.values_enabled = save_data.get('values_enabled', True)
 
             # Restore piles
             self.stock = self._deserialize_pile(save_data['stock'], StockPile)

@@ -56,6 +56,7 @@ class StatsTracker:
             'move_penalty': score_data['move_penalty'],
             'move_count': score_data['move_count'],
             'elapsed_time': score_data['elapsed_time'],
+            'scoring_mode': score_data.get('scoring_mode', 'Time + Moves + Values'),  # Dynamic mode name
             'timestamp': datetime.now().isoformat()
         }
 
@@ -107,18 +108,24 @@ class StatsTracker:
             'best_score': best_score
         }
 
-    def get_top_scores(self, limit: int = 10) -> List[Dict]:
+    def get_top_scores(self, limit: int = 10, scoring_mode: Optional[str] = None) -> List[Dict]:
         """
         Get top scores sorted by total score.
 
         Args:
             limit: Maximum number of scores to return
+            scoring_mode: Filter by scoring mode (None for all modes)
 
         Returns:
             List of top score entries
         """
+        # Filter by scoring mode if specified
+        filtered_scores = self.scores
+        if scoring_mode:
+            filtered_scores = [s for s in self.scores if s.get('scoring_mode', 'TMV') == scoring_mode]
+
         sorted_scores = sorted(
-            self.scores,
+            filtered_scores,
             key=lambda s: s['total_score'],
             reverse=True
         )
@@ -155,3 +162,23 @@ class StatsTracker:
             key=lambda s: s['move_count']
         )
         return sorted_moves[:limit]
+
+    def purge_all_scores(self) -> bool:
+        """
+        Delete all saved scores from the file.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Clear in-memory scores
+            self.scores = []
+
+            # Delete the file
+            if os.path.exists(self.filename):
+                os.remove(self.filename)
+
+            return True
+        except (IOError, OSError) as e:
+            print(f"Error purging scores: {e}")
+            return False

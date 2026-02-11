@@ -1,8 +1,8 @@
 """Game constants for Pygame Solitaire."""
 
 # Screen dimensions
-SCREEN_WIDTH = 1200
-SCREEN_HEIGHT = 800
+SCREEN_WIDTH = 1400
+SCREEN_HEIGHT = 900
 
 # Card dimensions
 CARD_WIDTH = 100
@@ -26,5 +26,50 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 
+# Background color options
+BACKGROUND_COLORS = {
+    'green': (0, 100, 0),
+    'blue': (30, 60, 110),
+    'grey': (60, 60, 60),
+    'gradient_sunset': None,  # Special gradient
+    'gradient_ocean': None,   # Special gradient
+    'gradient_forest': None,  # Special gradient
+}
+
+# Gradient definitions (top_color, bottom_color)
+GRADIENTS = {
+    'gradient_sunset': ((60, 40, 80), (120, 60, 40)),      # Purple to orange
+    'gradient_ocean': ((20, 50, 80), (40, 80, 100)),       # Dark blue to teal
+    'gradient_forest': ((20, 40, 30), (40, 80, 50)),       # Dark green to lighter green
+}
+
 # Game settings
 FPS = 60
+
+# Toggle-based scoring system
+# Players can enable/disable each factor independently
+DEFAULT_SCORING_FACTORS = {
+    'time_enabled': True,
+    'moves_enabled': True,
+    'values_enabled': True
+}
+
+def get_scoring_mode_name(time_enabled: bool, moves_enabled: bool, values_enabled: bool) -> str:
+    """
+    Generate display name for scoring mode based on enabled factors.
+
+    Returns:
+        Display name like "Time + Moves" or "Values Only" or "Complete Only"
+    """
+    factors = []
+    if time_enabled:
+        factors.append("Time")
+    if moves_enabled:
+        factors.append("Moves")
+    if values_enabled:
+        factors.append("Values")
+
+    if not factors:
+        return "Complete Only"  # No scoring, just track wins
+
+    return " + ".join(factors)

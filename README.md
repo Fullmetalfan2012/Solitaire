@@ -1,153 +1,257 @@
-# Pygame Solitaire Project
+# 🎴 Pygame Solitaire
 
-## Project Overview
-A classic Solitaire (Klondike) game built with pygame using object-oriented programming, with plans to extend into creative variations.
+A modern, feature-rich Klondike Solitaire game built with pygame, designed for extensibility and polish.
+
+**Current Status**: Phase 2 Complete! ✨ Full-featured game with professional UX, ready for Phase 3 (special abilities).
 
 ---
 
-## Development Roadmap
+## ✨ Features
 
-### Phase 1: Classic Solitaire (Core Foundation)
-**Goal**: Create a fully functional, traditional Klondike Solitaire game
+### Core Gameplay
+- **Classic Klondike Solitaire** with all traditional rules
+- **Smooth drag-and-drop** with intelligent card-based snapping (1/3 overlap threshold)
+- **Click-to-place** for single-option moves - speeds up obvious plays!
+- **Real-time scoring** with multiple components (time, moves, card value)
 
-#### 1.1 Core Game Objects
-- **Card Class**: Represents individual cards (rank, suit, face up/down, position)
-- **Deck Class**: Manages the full deck of 52 cards, shuffling, dealing
-- **Pile Classes**: Different pile types with their own rules
-  - `StockPile`: Draw pile (deck you click to draw cards)
-  - `WastePile`: Cards drawn from stock
-  - `FoundationPile`: Four piles where you build up suits (Ace to King)
-  - `TableauPile`: Seven tableau columns where you play the game
+### Quality of Life
+- **Unlimited undo/redo** - experiment freely! (U to undo, Ctrl+Y to redo)
+- **Auto-finish detection** - when all cards are revealed, press F to watch them fly home!
+- **Smart hint system** - 3 strategic hints per game + unlimited sage advice
+- **Smooth snap-back animations** - cards gracefully return when dropped in invalid spots
+- **Save/load** - pause and resume your game anytime
 
-#### 1.2 Game Logic & Rules
-- Card movement validation
-- Legal move detection (tableau building rules, foundation building)
-- Auto-complete detection (when all cards can be moved to foundation)
-- Win condition checking
-- Undo/Redo functionality (optional but recommended)
+### Customization
+- **Toggle-based difficulty** - Enable/disable Time, Moves, and Values scoring independently (8 combinations!)
+- **Separate leaderboards** - Each scoring combination tracks its own high scores
+- **6 background styles** - classic green, blue, grey, plus 3 beautiful gradients
+- **Leaderboard management** - Purge all scores to start fresh
+- **Persistent settings** - your preferences saved automatically
 
-#### 1.3 UI & Rendering
-- Card rendering (sprites or simple rectangles with text)
-- Pile rendering and positioning
+### Polish
+- **80+ animal facts** for sage advice (cats, dogs, birds, mice themes!) 🐱🐶🐦🐭
+- **Professional menus** with clickable UI
+- **Comprehensive statistics tracking** across all scoring modes
+- **Post-game arcade-style name entry** with score breakdown
+
+---
+
+## 🚀 Quick Start
+
+### Running the Game
+
+**Windows:**
+```bash
+# Double-click run_game.bat, or:
+python main.py
+```
+
+**Mac/Linux:**
+```bash
+# Double-click run_game.sh, or:
+./run_game.sh
+# Or directly:
+python3 main.py
+```
+
+The launcher scripts automatically install pygame if needed!
+
+### Requirements
+- Python 3.8+ (Python 3.13 recommended)
+- pygame 2.6+ (auto-installed by launcher scripts)
+
+### Manual Installation
+```bash
+pip install pygame
+python main.py
+```
+
+---
+
+## 🎮 Controls
+
+### Gameplay
+- **Mouse Drag**: Move cards
+- **Click**: Auto-place cards with single valid destination
+- **Stock (top-left)**: Click to draw cards
+- **U**: Undo (unlimited!)
+- **Ctrl+Y**: Redo
+- **F**: Auto-finish (when available)
+- **H**: Hint (3 per game)
+- **A**: Sage advice (unlimited animal wisdom!)
+- **R**: New game
+- **ESC**: Pause menu
+
+### Menus
+- **Arrow Keys / Mouse**: Navigate
+- **Enter / Click**: Select
+- **ESC**: Back
+
+---
+
+## 📊 Scoring System
+
+Customize your difficulty by toggling three independent scoring factors in Settings:
+
+### Scoring Factors
+- **⏱️ Time Bonus**: Rewards fast completion (15,000 base, decreases over time)
+- **🎯 Move Penalty**: Penalizes inefficient play (deducts points per move)
+- **💎 Move Values**: Awards points for cards moved to foundations
+
+### Example Modes (8 Total Combinations)
+- **All Enabled**: "Time + Moves + Values" (hardest, most competitive)
+- **Two Factors**: "Time + Moves", "Time + Values", "Moves + Values"
+- **One Factor**: "Time Only", "Moves Only", "Values Only"
+- **None**: "Complete Only" (just track wins, no scoring pressure)
+
+Each combination has its own separate leaderboard! Mix and match to find your perfect difficulty.
+
+---
+
+## 🏗️ Architecture
+
+### Module Structure (11 core modules)
+
+```
+solitaire/
+├── constants.py          # Configuration (positions, colors, scoring factors)
+├── card.py              # Card data structure with ability hooks
+├── pile.py              # Pile hierarchy (Stock, Waste, Foundation, Tableau)
+├── move.py              # Move tracking for undo/redo (Command Pattern)
+├── game_state.py        # Game logic orchestrator
+├── input_handler.py     # Drag-and-drop with overlap detection
+├── renderer.py          # All drawing logic
+├── settings.py          # User settings persistence
+├── stats.py             # Statistics tracking (per-mode leaderboards)
+├── menu_state.py        # Menu navigation
+└── main.py              # Game loop coordinator
+```
+
+### Key Design Patterns
+- **Command Pattern**: Move tracking for unlimited undo/redo
+- **Strategy Pattern**: Pile-based rules via `can_accept()`
+- **Settings-Driven**: JSON persistence for user preferences
+- **Separation of Concerns**: Clean module boundaries
+
+---
+
+## 📈 Development Phases
+
+### ✅ Phase 1: Classic Solitaire (COMPLETE)
+- Full Klondike implementation
+- All standard rules
 - Drag-and-drop mechanics
-- Click handling for stock pile
-- Visual feedback (highlighting valid moves, selected cards)
-- Score display (optional: moves, time, scoring system)
+- Win detection
 
-#### 1.4 Game State Management
-- Game initialization and reset
-- Save/load game state (optional)
-- Main game loop
+### ✅ Phase 2: Polish & Enhancement (COMPLETE)
+**Phase 2.5 Additions:**
+- Unlimited undo/redo system (Command Pattern)
+- Toggle-based scoring (8 difficulty combinations)
+- Per-mode separate leaderboards with purge functionality
+- Auto-finish detection + smooth animations
+- Card-based overlap snapping (1/3 threshold)
+- Click-to-place for single-option moves
+- Snap-back animations
+- 80+ animal-themed sage advice facts
+- 6 background color options (including gradients)
+- Extended window size (1400×900) for long stacks
+- Complete settings system with persistence
 
----
+### 🔜 Phase 3: Special Abilities (PLANNED)
+- Suit-based abilities (Hearts, Diamonds, Clubs, Spades)
+- Rank-based abilities (Aces, Kings, etc.)
+- Power-ups and special cards
+- Modified base rules for increased difficulty
+- Custom card artwork (animal-themed: cats, dogs, birds, mice)
+- Stochastic fairness balancing
 
-### Phase 2: Polish & Enhancement
-**Goal**: Make the game enjoyable and user-friendly
-
-#### 2.1 Visual Polish
-- Card assets/graphics (find royalty-free or create simple designs)
-- Animations (card movement, dealing, flipping)
-- Background and UI theming
-- Sound effects (optional: card flip, win celebration)
-
-#### 2.2 User Experience
-- Menu system (new game, settings, quit)
-- Difficulty options (draw 1 vs draw 3 cards)
-- Statistics tracking (games won, win rate, best time)
-- Hints system (suggest valid moves)
-- Keyboard shortcuts
-
----
-
-### Phase 3: Creative Variations
-**Goal**: Experiment with fun twists on classic Solitaire
-
-#### 3.1 Brainstorm Ideas
-Some possibilities to explore:
-- **Power-up Solitaire**: Collect power-ups that let you break rules (swap cards, reveal hidden cards)
-- **Time Attack Mode**: Race against the clock with bonus points
-- **Multi-deck Solitaire**: Play with 2+ decks for increased complexity
-- **Story Mode**: Progress through levels with different constraints/challenges
-- **Multiplayer**: Racing mode or collaborative puzzle solving
-- **Roguelike Solitaire**: Random modifiers, unlockable abilities
-- **Themed Variations**: Spider Solitaire, Freecell, Pyramid, etc.
-
-#### 3.2 Implementation Strategy
-- Build on Phase 1's solid OOP foundation
-- Create variant classes that inherit from base game
-- Modular design allows easy experimentation
+### 🔮 Phase 4: Advanced Features (FUTURE)
+- Loss/unwinnable detection (NP-complete challenge!)
+- Advanced animations (dealing, card flips)
+- AI opponent / auto-solver
+- Alternative variants (Spider, Freecell, Pyramid)
 
 ---
 
-## Technical Architecture (OOP Design)
+## 📚 Documentation
 
-### Proposed Class Structure
-```
-Card
-├─ Properties: rank, suit, face_up, position, sprite
-└─ Methods: flip(), is_adjacent(), can_stack_on()
+- **[CLAUDE.md](CLAUDE.md)**: Project instructions for Claude Code (development history, architecture decisions)
+- **[DEVELOPERS.md](DEVELOPERS.md)**: Comprehensive guide for modifying game mechanics and adding abilities
+- **[PLAYTEST_INSTRUCTIONS.md](PLAYTEST_INSTRUCTIONS.md)**: Quick-start guide for playtesters
 
-Pile (Abstract Base)
-├─ Properties: cards[], position, pile_type
-├─ Methods: add_card(), remove_card(), can_accept(), render()
-└─ Subclasses: StockPile, WastePile, FoundationPile, TableauPile
+---
 
-GameState
-├─ Properties: piles[], score, moves, timer
-└─ Methods: initialize(), reset(), check_win(), get_valid_moves()
+## 🧪 For Developers
 
-InputHandler
-├─ Methods: handle_click(), handle_drag(), handle_drop()
-└─ Manages all user interactions
+### Adding Special Abilities (Phase 3)
 
-Renderer
-├─ Methods: draw_cards(), draw_piles(), draw_ui()
-└─ Handles all visual rendering
-
-SolitaireGame (Main Controller)
-├─ Properties: game_state, renderer, input_handler
-└─ Methods: run(), update(), handle_events()
+Cards have built-in extension points:
+```python
+card.special_suit_ability = "hearts_heal"
+card.special_rank_ability = "king_castle"
 ```
 
----
+See [DEVELOPERS.md](DEVELOPERS.md) for step-by-step guides on:
+- Implementing suit/rank abilities
+- Modifying game rules
+- Creating new pile types
+- Extending the scoring system
 
-## Development Milestones
+### Tuning Scoring Modes
 
-### Milestone 1: Foundation
-- [ ] Implement Card and Deck classes
-- [ ] Create basic Pile classes with rules
-- [ ] Render cards as simple colored rectangles with text
-- [ ] Deal initial tableau
+Edit `constants.py → SCORING_MODES`:
+```python
+'TMV': {
+    'scale': 1.0,  # Adjust this to normalize scores
+    'order': ['time', 'moves', 'value'],
+    ...
+}
+```
 
-### Milestone 2: Playable Game
-- [ ] Implement drag-and-drop
-- [ ] Validate moves according to Solitaire rules
-- [ ] Stock and waste pile functionality
-- [ ] Foundation pile completion
-- [ ] Win detection
-
-### Milestone 3: Complete Classic
-- [ ] Card graphics/assets
-- [ ] Animations
-- [ ] Menu and reset functionality
-- [ ] Score/time tracking
-
-### Milestone 4: Creative Mode
-- [ ] Design and implement chosen variation(s)
-- [ ] Playtest and iterate
+### Performance Notes
+- **Move tracking**: ~100 bytes per move (vs 3KB with deepcopy)
+- **Overlap detection**: O(n) where n = number of piles (~13)
+- **Target**: 60 FPS (achieved with smooth animations)
 
 ---
 
-## Discussion Points
+## 🎨 Asset Credits
 
-1. **Card Graphics**: Should we use image sprites or start with programmatic rendering?
-2. **Animation Priority**: Essential vs nice-to-have animations?
-3. **Scoring System**: Classic Vegas scoring, timed scoring, or move-based?
-4. **Creative Direction**: Which variation(s) excite you most?
-5. **Scope**: Start minimal and iterate, or build more features upfront?
+- **Card rendering**: Placeholder graphics (PNG support ready)
+- **Recommended card assets**: [Playing Cards by hanhaechi](https://github.com/hanhaechi/playing-cards)
+- **Custom artwork**: Animal-themed cards (cats, dogs, birds, mice) coming in Phase 3!
 
 ---
 
-## Next Steps
+## 🤝 Contributing
 
-Once we align on the approach, we can begin with Milestone 1 and build iteratively!
+This is a personal learning project, but feedback is always welcome!
+
+**Playtesting**: Run the game, play a few rounds, and report:
+- Bugs or crashes
+- Balance issues (is it too easy/hard?)
+- UX friction (what feels awkward?)
+- Feature requests
+
+See [PLAYTEST_INSTRUCTIONS.md](PLAYTEST_INSTRUCTIONS.md) for detailed testing guide.
+
+---
+
+## 📝 License
+
+Personal project - all rights reserved. Feel free to learn from the code!
+
+---
+
+## 🌟 Acknowledgments
+
+Built with love, pygame, and a lot of iterative development. Special thanks to:
+- Claude Code (AI pair programming partner)
+- Playtesting friends providing invaluable feedback
+- The pygame community
+
+---
+
+**Enjoy the game! 🎴✨**
+
+*"Sometimes you win, sometimes you shuffle and deal again."*

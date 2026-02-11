@@ -1,8 +1,11 @@
 """Rendering logic for Pygame Solitaire."""
 
 import pygame
-from typing import TYPE_CHECKING, Dict, List
-from constants import GREEN_FELT, DARKER_GREEN, WHITE, BLACK, SCREEN_WIDTH, SCREEN_HEIGHT
+from typing import TYPE_CHECKING, Dict, List, Optional
+from constants import (
+    GREEN_FELT, DARKER_GREEN, WHITE, BLACK, SCREEN_WIDTH, SCREEN_HEIGHT,
+    BACKGROUND_COLORS, GRADIENTS
+)
 
 if TYPE_CHECKING:
     from game_state import GameState
@@ -25,8 +28,51 @@ class Renderer:
         self.screen = screen
         self.game_state = game_state
         self.background_color = GREEN_FELT
+        self.background_name = 'green'  # Current background setting
         self.font = pygame.font.Font(None, 48)
         self.small_font = pygame.font.Font(None, 24)
+
+    def set_background(self, background_name: str):
+        """
+        Set the background color/gradient by name.
+
+        Args:
+            background_name: Name from BACKGROUND_COLORS dict
+        """
+        self.background_name = background_name
+        # Set solid color if not a gradient
+        if background_name in BACKGROUND_COLORS and BACKGROUND_COLORS[background_name]:
+            self.background_color = BACKGROUND_COLORS[background_name]
+        elif background_name.startswith('gradient_'):
+            # For gradients, we'll use a default solid color as fallback
+            self.background_color = (50, 50, 50)
+
+    def _draw_background(self):
+        """Draw the background (solid or gradient)."""
+        if self.background_name.startswith('gradient_') and self.background_name in GRADIENTS:
+            # Draw gradient
+            top_color, bottom_color = GRADIENTS[self.background_name]
+            self._draw_gradient(top_color, bottom_color)
+        else:
+            # Draw solid color
+            self.screen.fill(self.background_color)
+
+    def _draw_gradient(self, top_color: tuple, bottom_color: tuple):
+        """
+        Draw a vertical gradient background.
+
+        Args:
+            top_color: RGB tuple for top of screen
+            bottom_color: RGB tuple for bottom of screen
+        """
+        for y in range(SCREEN_HEIGHT):
+            # Interpolate between top and bottom colors
+            ratio = y / SCREEN_HEIGHT
+            color = tuple(
+                int(top_color[i] + (bottom_color[i] - top_color[i]) * ratio)
+                for i in range(3)
+            )
+            pygame.draw.line(self.screen, color, (0, y), (SCREEN_WIDTH, y))
 
     def render(self, input_handler: 'InputHandler'):
         """
@@ -35,8 +81,8 @@ class Renderer:
         Args:
             input_handler: Input handler (to know which cards are being dragged)
         """
-        # Clear screen
-        self.screen.fill(self.background_color)
+        # Draw background
+        self._draw_background()
 
         # Draw pile outlines for empty piles
         self._draw_pile_outlines()
@@ -59,6 +105,13 @@ class Renderer:
 
         # Draw sage advice
         self._draw_sage_advice()
+
+        # Draw auto-finish button if available
+        self._draw_auto_finish()
+
+        # Draw animating card during auto-finish
+        if self.game_state.auto_finishing and self.game_state.auto_finish_card:
+            self._draw_auto_finish_animation()
 
         # Update display
         pygame.display.flip()
@@ -119,17 +172,18 @@ class Renderer:
         text_rect = surface.get_rect(topright=(SCREEN_WIDTH - 20, 10))
         self.screen.blit(surface, text_rect)
 
-        # Undo counter (top-left)
+        # Undo/Redo counter (top-left, to the right of waste pile to avoid overlap)
         undo_count = self.game_state.get_undo_count()
-        undo_text = f"Undo (U): {undo_count}/3"
+        redo_count = self.game_state.get_redo_count()
+        undo_text = f"Undo (U): {undo_count}  |  Redo (Ctrl+Y): {redo_count}"
         undo_surface = self.small_font.render(undo_text, True, WHITE)
-        self.screen.blit(undo_surface, (20, 10))
+        self.screen.blit(undo_surface, (350, 10))
 
         # Hint counter (below undo)
         hint_count = self.game_state.hints_remaining
         hint_text = f"Hints (H): {hint_count}/3  |  Advice (A): ∞"
         hint_surface = self.small_font.render(hint_text, True, WHITE)
-        self.screen.blit(hint_surface, (20, 40))
+        self.screen.blit(hint_surface, (350, 40))
 
     def _draw_hint_highlights(self):
         """Draw glowing highlights on valid move destinations."""
@@ -173,6 +227,59 @@ class Renderer:
         advice = self.game_state.sage_advice_text
         advice_surface = self.small_font.render(advice, True, WHITE)
         self.screen.blit(advice_surface, (20, SCREEN_HEIGHT - panel_height + 40))
+
+    def _draw_auto_finish(self):
+        """Draw auto-finish button if available."""
+        if not self.game_state.auto_finish_available:
+            return
+
+        # Button position (center bottom, above sage advice area)
+        button_width = 200
+        button_height = 50
+        button_x = (SCREEN_WIDTH - button_width) // 2
+        button_y = SCREEN_HEIGHT - 150
+
+        # Draw button
+        button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
+        pygame.draw.rect(self.screen, (80, 120, 80), button_rect)  # Green button
+        pygame.draw.rect(self.screen, (120, 200, 120), button_rect, 3)  # Bright border
+
+        # Draw text
+        text = self.small_font.render("Auto-Finish (F)", True, WHITE)
+        text_rect = text.get_rect(center=button_rect.center)
+        self.screen.blit(text, text_rect)
+
+    def _draw_auto_finish_animation(self):
+        """Draw card flying to foundation during auto-finish."""
+        import time
+        import math
+
+        card = self.game_state.auto_finish_card
+        source = self.game_state.auto_finish_source
+        target = self.game_state.auto_finish_target
+
+        if not (card and source and target):
+            return
+
+        # Calculate animation progress (0.0 to 1.0)
+        elapsed = time.time() - self.game_state.auto_finish_start_time
+        progress = min(1.0, elapsed / 0.3)  # 0.3s animation
+
+        # Interpolate position from source to target
+        start_x, start_y = source.rect.x, source.rect.y
+        end_x, end_y = target.rect.x, target.rect.y
+
+        # Add slight arc to the animation
+        arc_height = 100
+        arc_progress = math.sin(progress * math.pi) * arc_height
+
+        current_x = start_x + (end_x - start_x) * progress
+        current_y = start_y + (end_y - start_y) * progress - arc_progress
+
+        # Draw the card at animated position
+        card.rect.x = int(current_x)
+        card.rect.y = int(current_y)
+        card.draw(self.screen)
 
     def render_win_message(self):
         """Display win message overlay."""
@@ -297,27 +404,46 @@ class Renderer:
             if y > SCREEN_HEIGHT - 30:
                 break
 
-    def render_menu(self, menu_state: 'MenuState', stats_tracker: 'StatsTracker' = None):
+    def render_menu(self, menu_state: 'MenuState', stats_tracker: 'StatsTracker' = None, input_handler=None):
         """
         Render menu screens.
 
         Args:
             menu_state: Current menu state
             stats_tracker: Stats tracker for high scores display
+            input_handler: Input handler (for pause menu to show game underneath)
         """
         from menu_state import MenuScreen
 
-        # Clear screen
-        self.screen.fill((20, 20, 40))  # Dark blue background
-
-        if menu_state.current_screen == MenuScreen.MAIN_MENU:
-            self._render_main_menu(menu_state)
-        elif menu_state.current_screen == MenuScreen.HIGH_SCORES:
-            self._render_high_scores(stats_tracker)
-        elif menu_state.current_screen == MenuScreen.SETTINGS:
-            self._render_settings()
-        elif menu_state.current_screen == MenuScreen.PAUSE_MENU:
+        # For pause menu, render game first then overlay
+        if menu_state.current_screen == MenuScreen.PAUSE_MENU and input_handler:
+            # Render the game board underneath
+            self._draw_background()
+            for pile in self.game_state.all_piles:
+                for card in pile.cards:
+                    if card not in input_handler.dragged_cards:
+                        card.draw(self.screen)
+            for card in input_handler.dragged_cards:
+                card.draw(self.screen)
+            self._draw_score_info()
+            # Now render pause menu overlay on top
             self._render_pause_menu(menu_state)
+        else:
+            # Clear screen for other menus
+            self.screen.fill((20, 20, 40))  # Dark blue background
+
+            if menu_state.current_screen == MenuScreen.MAIN_MENU:
+                self._render_main_menu(menu_state)
+            elif menu_state.current_screen == MenuScreen.HIGH_SCORES:
+                self._render_high_scores(stats_tracker)
+            elif menu_state.current_screen == MenuScreen.SETTINGS:
+                # Get scoring factors from game state
+                scoring_factors = {
+                    'time_enabled': getattr(self.game_state, 'time_enabled', True),
+                    'moves_enabled': getattr(self.game_state, 'moves_enabled', True),
+                    'values_enabled': getattr(self.game_state, 'values_enabled', True)
+                }
+                self._render_settings(self.background_name, scoring_factors)
 
         pygame.display.flip()
 
@@ -359,17 +485,29 @@ class Renderer:
         self._render_menu_options(menu_state, start_y=300)
 
     def _render_high_scores(self, stats_tracker: 'StatsTracker'):
-        """Render high scores screen."""
+        """Render high scores screen (filtered by current scoring mode)."""
+        from constants import get_scoring_mode_name
+
         # Title
         title = self.font.render("High Scores", True, (255, 215, 0))
-        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 80))
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 60))
         self.screen.blit(title, title_rect)
+
+        # Get current scoring mode name from game state
+        time_enabled = getattr(self.game_state, 'time_enabled', True)
+        moves_enabled = getattr(self.game_state, 'moves_enabled', True)
+        values_enabled = getattr(self.game_state, 'values_enabled', True)
+        mode_name = get_scoring_mode_name(time_enabled, moves_enabled, values_enabled)
+
+        mode_text = self.small_font.render(f"Mode: {mode_name}", True, (180, 180, 180))
+        mode_rect = mode_text.get_rect(center=(SCREEN_WIDTH // 2, 110))
+        self.screen.blit(mode_text, mode_rect)
 
         y_offset = 150
 
         if stats_tracker and stats_tracker.scores:
-            # Get top 10 scores
-            top_scores = stats_tracker.get_top_scores(10)
+            # Get top 10 scores for current mode
+            top_scores = stats_tracker.get_top_scores(10, mode_name)
 
             # Headers
             header_text = "RANK    NAME    SCORE       MOVES    TIME"
@@ -403,31 +541,165 @@ class Renderer:
         back_rect = back_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
         self.screen.blit(back_text, back_rect)
 
-    def _render_settings(self):
-        """Render settings screen."""
+    def _render_settings(self, current_bg: Optional[str] = None, scoring_factors: Optional[Dict[str, bool]] = None):
+        """
+        Render settings screen with clickable background swatches and scoring factor checkboxes.
+
+        Args:
+            current_bg: Current background color setting
+            scoring_factors: Dictionary of enabled scoring factors
+        """
+        from constants import get_scoring_mode_name
+
+        # Default scoring factors if not provided
+        if scoring_factors is None:
+            scoring_factors = {
+                'time_enabled': True,
+                'moves_enabled': True,
+                'values_enabled': True
+            }
+
         # Title
         title = self.font.render("Settings", True, (255, 215, 0))
         title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 80))
         self.screen.blit(title, title_rect)
 
-        y_offset = 200
+        # Background color section
+        y_offset = 150
+        subtitle = self.font.render("Background Color", True, WHITE)
+        subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, y_offset))
+        self.screen.blit(subtitle, subtitle_rect)
 
-        # Scoring toggles (for future implementation)
-        settings_text = [
-            "Scoring Categories:",
-            "",
-            "✓ Time-based scoring: Enabled",
-            "✓ Move count penalty: Enabled",
-            "✓ Move value scoring: Enabled",
-            "",
-            "(Settings customization coming soon!)"
+        # Background options with clickable swatches
+        bg_options = [
+            ('green', 'Classic Green', (0, 100, 0)),
+            ('blue', 'Ocean Blue', (30, 60, 110)),
+            ('grey', 'Slate Grey', (60, 60, 60)),
+            ('gradient_sunset', 'Sunset', (90, 50, 60)),  # Average gradient color
+            ('gradient_ocean', 'Ocean', (30, 65, 90)),     # Average gradient color
+            ('gradient_forest', 'Forest', (30, 60, 40)),   # Average gradient color
         ]
 
-        for line in settings_text:
-            text = self.small_font.render(line, True, WHITE)
-            text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, y_offset))
-            self.screen.blit(text, text_rect)
-            y_offset += 35
+        y_offset = 220
+        swatch_size = 80
+        spacing = 150
+        start_x = (SCREEN_WIDTH - (len(bg_options) * spacing - (spacing - swatch_size))) // 2
+
+        # Store rects for click detection (stored in renderer for access by main.py)
+        self.bg_swatch_rects = {}
+
+        for i, (bg_key, bg_name, color) in enumerate(bg_options):
+            x = start_x + i * spacing
+
+            # Draw swatch
+            swatch_rect = pygame.Rect(x, y_offset, swatch_size, swatch_size)
+
+            # Draw gradient preview for gradients
+            if bg_key.startswith('gradient_'):
+                top_color, bottom_color = GRADIENTS[bg_key]
+                for y in range(swatch_size):
+                    ratio = y / swatch_size
+                    line_color = tuple(
+                        int(top_color[j] + (bottom_color[j] - top_color[j]) * ratio)
+                        for j in range(3)
+                    )
+                    pygame.draw.line(self.screen, line_color,
+                                   (x, y_offset + y), (x + swatch_size, y_offset + y))
+            else:
+                pygame.draw.rect(self.screen, color, swatch_rect)
+
+            # Draw border (gold if selected, white otherwise)
+            border_color = (255, 215, 0) if bg_key == current_bg else WHITE
+            border_width = 4 if bg_key == current_bg else 2
+            pygame.draw.rect(self.screen, border_color, swatch_rect, border_width)
+
+            # Draw label
+            label = self.small_font.render(bg_name, True, WHITE)
+            label_rect = label.get_rect(center=(x + swatch_size // 2, y_offset + swatch_size + 20))
+            self.screen.blit(label, label_rect)
+
+            # Store rect for click detection
+            self.bg_swatch_rects[bg_key] = swatch_rect
+
+        # Scoring factors section
+        y_offset = 420
+        subtitle2 = self.font.render("Scoring Factors", True, WHITE)
+        subtitle2_rect = subtitle2.get_rect(center=(SCREEN_WIDTH // 2, y_offset))
+        self.screen.blit(subtitle2, subtitle2_rect)
+
+        # Show current mode name
+        y_offset += 50
+        current_mode_name = get_scoring_mode_name(
+            scoring_factors['time_enabled'],
+            scoring_factors['moves_enabled'],
+            scoring_factors['values_enabled']
+        )
+        mode_display = self.small_font.render(f"Current Mode: {current_mode_name}", True, (200, 200, 200))
+        mode_rect = mode_display.get_rect(center=(SCREEN_WIDTH // 2, y_offset))
+        self.screen.blit(mode_display, mode_rect)
+
+        # Scoring factor checkboxes
+        y_offset += 50
+        checkbox_size = 30
+        label_spacing = 200
+        start_x = (SCREEN_WIDTH - (3 * label_spacing)) // 2
+
+        self.scoring_factor_rects = {}
+
+        factors = [
+            ('time_enabled', 'Time Bonus'),
+            ('moves_enabled', 'Move Penalty'),
+            ('values_enabled', 'Move Values')
+        ]
+
+        for i, (factor_key, factor_label) in enumerate(factors):
+            x = start_x + i * label_spacing
+
+            # Draw checkbox
+            checkbox_rect = pygame.Rect(x, y_offset, checkbox_size, checkbox_size)
+            checkbox_bg = (40, 40, 40)
+            pygame.draw.rect(self.screen, checkbox_bg, checkbox_rect)
+            pygame.draw.rect(self.screen, WHITE, checkbox_rect, 2)
+
+            # Draw checkmark if enabled
+            if scoring_factors.get(factor_key, True):
+                # Draw checkmark
+                checkmark_color = (100, 255, 100)
+                pygame.draw.line(self.screen, checkmark_color,
+                               (x + 5, y_offset + checkbox_size // 2),
+                               (x + checkbox_size // 3, y_offset + checkbox_size - 5), 3)
+                pygame.draw.line(self.screen, checkmark_color,
+                               (x + checkbox_size // 3, y_offset + checkbox_size - 5),
+                               (x + checkbox_size - 5, y_offset + 5), 3)
+
+            # Draw label
+            label = self.small_font.render(factor_label, True, WHITE)
+            label_rect = label.get_rect(midleft=(x + checkbox_size + 10, y_offset + checkbox_size // 2))
+            self.screen.blit(label, label_rect)
+
+            # Store rect for click detection (include label for easier clicking)
+            extended_rect = pygame.Rect(x, y_offset, label_spacing - 20, checkbox_size)
+            self.scoring_factor_rects[factor_key] = extended_rect
+
+        # Purge scores button
+        y_offset += 100
+        purge_button_width = 250
+        purge_button_height = 40
+        purge_x = (SCREEN_WIDTH - purge_button_width) // 2
+
+        self.purge_button_rect = pygame.Rect(purge_x, y_offset, purge_button_width, purge_button_height)
+        purge_bg_color = (100, 30, 30)  # Dark red
+        pygame.draw.rect(self.screen, purge_bg_color, self.purge_button_rect)
+        pygame.draw.rect(self.screen, (200, 100, 100), self.purge_button_rect, 2)
+
+        purge_text = self.small_font.render("Clear All Scores", True, WHITE)
+        purge_text_rect = purge_text.get_rect(center=self.purge_button_rect.center)
+        self.screen.blit(purge_text, purge_text_rect)
+
+        # Warning text
+        warning_text = self.small_font.render("(This cannot be undone!)", True, (180, 100, 100))
+        warning_rect = warning_text.get_rect(center=(SCREEN_WIDTH // 2, y_offset + purge_button_height + 20))
+        self.screen.blit(warning_text, warning_rect)
 
         # Back button
         back_text = self.small_font.render("Press ESC or click here to go back", True, (150, 150, 150))
