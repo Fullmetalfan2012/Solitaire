@@ -21,8 +21,7 @@ class Move:
         to_pile: 'Pile',
         cards: List['Card'],
         revealed_card: Optional['Card'] = None,
-        card_states: Optional[List[bool]] = None,
-        score_delta: int = 0
+        card_states: Optional[List[bool]] = None
     ):
         """
         Initialize a move.
@@ -33,7 +32,6 @@ class Move:
             cards: Cards that were moved (in order)
             revealed_card: Card that was revealed as result of move (if any)
             card_states: Face-up states of moved cards before move (for undo)
-            score_delta: Score change caused by this move (for undo/redo)
         """
         self.from_pile = from_pile
         self.to_pile = to_pile
@@ -41,8 +39,6 @@ class Move:
         self.revealed_card = revealed_card
         # Store original face-up states for undo
         self.card_states = card_states if card_states else [card.face_up for card in cards]
-        # Store score change for proper undo/redo
-        self.score_delta = score_delta
 
     def execute(self):
         """Execute this move (move cards from source to destination)."""
@@ -89,8 +85,7 @@ class Move:
             'to_pile_index': all_piles.index(self.to_pile),
             'cards': [(card.rank, card.suit) for card in self.cards],
             'card_states': self.card_states,
-            'revealed_card': (self.revealed_card.rank, self.revealed_card.suit) if self.revealed_card else None,
-            'score_delta': self.score_delta
+            'revealed_card': (self.revealed_card.rank, self.revealed_card.suit) if self.revealed_card else None
         }
 
     @classmethod
@@ -134,7 +129,7 @@ class Move:
                 if revealed_card:
                     break
 
-        return cls(from_pile, to_pile, cards, revealed_card, data.get('card_states'), data.get('score_delta', 0))
+        return cls(from_pile, to_pile, cards, revealed_card, data.get('card_states'))
 
     def __repr__(self) -> str:
         """String representation for debugging."""

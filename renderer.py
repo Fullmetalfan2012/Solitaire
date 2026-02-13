@@ -8,48 +8,31 @@ from constants import (
 )
 
 if TYPE_CHECKING:
-    from game_board import GameBoard
+    from game_state import GameState
     from input_handler import InputHandler
     from menu_state import MenuState, MenuScreen
     from stats import StatsTracker
-    from sage_advice import SageAdviceSystem
-    from auto_finish import AutoFinishSystem
-    from hint_system import HintSystem
-    from scoring_engine import ScoringEngine
-    from ui_state import UIState
 
 
 class Renderer:
     """Handles all drawing/rendering logic."""
 
-    def __init__(self, screen: pygame.Surface, game_state: 'GameBoard', sage_advice: 'SageAdviceSystem' = None, auto_finish: 'AutoFinishSystem' = None, hint_system: 'HintSystem' = None, scoring_engine: 'ScoringEngine' = None, ui_state: 'UIState' = None):
+    def __init__(self, screen: pygame.Surface, game_state: 'GameState'):
         """
         Initialize renderer.
 
         Args:
             screen: Pygame display surface
             game_state: Game state to render
-            sage_advice: Sage advice system (optional for backward compatibility)
-            auto_finish: Auto-finish system (optional for backward compatibility)
-            hint_system: Hint system (optional for backward compatibility)
-            scoring_engine: Scoring engine (optional for backward compatibility)
-            ui_state: UI state manager (optional for backward compatibility)
         """
         self.screen = screen
         self.game_state = game_state
-        self.sage_advice = sage_advice
-        self.auto_finish = auto_finish
-        self.hint_system = hint_system
-        self.scoring_engine = scoring_engine
-        self.ui_state = ui_state
         self.background_color = GREEN_FELT
         self.background_name = 'green'  # Current background setting
         self.pile_outline_color = DARKER_GREEN  # Default pile outline color
         self.pile_outline_name = 'green'  # Current pile outline setting
         self.font = pygame.font.Font(None, 48)
         self.small_font = pygame.font.Font(None, 24)
-        # Cache for gradient surfaces (900x performance improvement)
-        self._gradient_cache: Dict[str, pygame.Surface] = {}
 
     def set_background(self, background_name: str):
         """
@@ -82,29 +65,21 @@ class Renderer:
     def _draw_background(self):
         """Draw the background (solid or gradient)."""
         if self.background_name.startswith('gradient_') and self.background_name in GRADIENTS:
-            # Use cached gradient surface for 900x performance improvement
-            if self.background_name not in self._gradient_cache:
-                # Create and cache gradient surface
-                top_color, bottom_color = GRADIENTS[self.background_name]
-                self._gradient_cache[self.background_name] = self._create_gradient_surface(top_color, bottom_color)
-            # Blit cached gradient (60 blits/sec instead of 54,000 line draws/sec)
-            self.screen.blit(self._gradient_cache[self.background_name], (0, 0))
+            # Draw gradient
+            top_color, bottom_color = GRADIENTS[self.background_name]
+            self._draw_gradient(top_color, bottom_color)
         else:
             # Draw solid color
             self.screen.fill(self.background_color)
 
-    def _create_gradient_surface(self, top_color: tuple, bottom_color: tuple) -> pygame.Surface:
+    def _draw_gradient(self, top_color: tuple, bottom_color: tuple):
         """
-        Create a gradient surface (for caching).
+        Draw a vertical gradient background.
 
         Args:
             top_color: RGB tuple for top of screen
             bottom_color: RGB tuple for bottom of screen
-
-        Returns:
-            Surface containing the rendered gradient
         """
-        surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         for y in range(SCREEN_HEIGHT):
             # Interpolate between top and bottom colors
             ratio = y / SCREEN_HEIGHT
@@ -112,8 +87,7 @@ class Renderer:
                 int(top_color[i] + (bottom_color[i] - top_color[i]) * ratio)
                 for i in range(3)
             )
-            pygame.draw.line(surface, color, (0, y), (SCREEN_WIDTH, y))
-        return surface
+            pygame.draw.line(self.screen, color, (0, y), (SCREEN_WIDTH, y))
 
     def render(self, input_handler: 'InputHandler'):
         """
@@ -151,7 +125,7 @@ class Renderer:
         self._draw_auto_finish()
 
         # Draw animating card during auto-finish
-        if self.auto_finish and self.auto_finish.active and self.auto_finish.current_card:
+        if self.game_state.auto_finishing and self.game_state.auto_finish_card:
             self._draw_auto_finish_animation()
 
         # Update display
@@ -197,8 +171,7 @@ class Renderer:
 
     def _draw_score_info(self):
         """Draw score, moves, time, and undo counter at top."""
-        # Get score data from scoring_engine
-        score_data = self.scoring_engine.get_current_score(self.game_state.move_count)
+        score_data = self.game_state.get_current_score()
         elapsed = score_data['elapsed_time']
 
         # Format time as MM:SS
@@ -216,23 +189,21 @@ class Renderer:
         self.screen.blit(surface, text_rect)
 
         # Undo/Redo counter (top-left, to the right of waste pile to avoid overlap)
-        undo_count = self.game_state.undo_manager.get_undo_count()
-        redo_count = self.game_state.undo_manager.get_redo_count()
+        undo_count = self.game_state.get_undo_count()
+        redo_count = self.game_state.get_redo_count()
         undo_text = f"Undo (U): {undo_count}  |  Redo (Ctrl+Y): {redo_count}"
         undo_surface = self.small_font.render(undo_text, True, WHITE)
         self.screen.blit(undo_surface, (350, 10))
 
         # Hint counter (below undo)
-        hint_count = self.hint_system.hints_remaining if self.hint_system else getattr(self.game_state, 'hints_remaining', 3)
+        hint_count = self.game_state.hints_remaining
         hint_text = f"Hints (H): {hint_count}/3  |  Advice (A): ∞"
         hint_surface = self.small_font.render(hint_text, True, WHITE)
         self.screen.blit(hint_surface, (350, 40))
 
     def _draw_hint_highlights(self):
         """Draw glowing highlights on valid move destinations."""
-        hint_targets = self.hint_system.highlighted_targets
-
-        if not hint_targets:
+        if not self.game_state.hint_targets:
             return
 
         # Pulsing glow effect
@@ -240,7 +211,7 @@ class Renderer:
         pulse = abs(math.sin(pygame.time.get_ticks() / 300.0))
         alpha = int(128 + 127 * pulse)
 
-        for pile in hint_targets:
+        for pile in self.game_state.hint_targets:
             # Create semi-transparent overlay
             highlight = pygame.Surface((pile.rect.width, pile.rect.height))
             highlight.set_alpha(alpha)
@@ -253,9 +224,7 @@ class Renderer:
 
     def _draw_sage_advice(self):
         """Draw sage advice text at bottom of screen."""
-        advice_text = self.sage_advice.advice_text if self.sage_advice else None
-
-        if not advice_text:
+        if not self.game_state.sage_advice_text:
             return
 
         # Semi-transparent background panel
@@ -271,14 +240,13 @@ class Renderer:
         self.screen.blit(label, (20, SCREEN_HEIGHT - panel_height + 10))
 
         # Advice text (word-wrapped if needed)
-        advice_surface = self.small_font.render(advice_text, True, WHITE)
+        advice = self.game_state.sage_advice_text
+        advice_surface = self.small_font.render(advice, True, WHITE)
         self.screen.blit(advice_surface, (20, SCREEN_HEIGHT - panel_height + 40))
 
     def _draw_auto_finish(self):
         """Draw auto-finish button if available."""
-        available = self.auto_finish.available if self.auto_finish else False
-
-        if not available:
+        if not self.game_state.auto_finish_available:
             return
 
         # Button position (center bottom, above sage advice area)
@@ -302,20 +270,15 @@ class Renderer:
         import time
         import math
 
-        # Try new auto_finish system first
-        if not self.auto_finish:
-            return
-
-        card = self.auto_finish.current_card
-        source = self.auto_finish.source_pile
-        target = self.auto_finish.target_pile
-        start_time = self.auto_finish.start_time
+        card = self.game_state.auto_finish_card
+        source = self.game_state.auto_finish_source
+        target = self.game_state.auto_finish_target
 
         if not (card and source and target):
             return
 
         # Calculate animation progress (0.0 to 1.0)
-        elapsed = time.time() - start_time
+        elapsed = time.time() - self.game_state.auto_finish_start_time
         progress = min(1.0, elapsed / 0.3)  # 0.3s animation
 
         # Interpolate position from source to target
@@ -490,19 +453,12 @@ class Renderer:
             elif menu_state.current_screen == MenuScreen.HIGH_SCORES:
                 self._render_high_scores(stats_tracker)
             elif menu_state.current_screen == MenuScreen.SETTINGS:
-                # Get scoring factors from scoring_engine if available, otherwise game_state
-                if self.scoring_engine:
-                    scoring_factors = {
-                        'time_enabled': self.scoring_engine.time_enabled,
-                        'moves_enabled': self.scoring_engine.moves_enabled,
-                        'values_enabled': self.scoring_engine.values_enabled
-                    }
-                else:
-                    scoring_factors = {
-                        'time_enabled': getattr(self.game_state, 'time_enabled', True),
-                        'moves_enabled': getattr(self.game_state, 'moves_enabled', True),
-                        'values_enabled': getattr(self.game_state, 'values_enabled', True)
-                    }
+                # Get scoring factors from game state
+                scoring_factors = {
+                    'time_enabled': getattr(self.game_state, 'time_enabled', True),
+                    'moves_enabled': getattr(self.game_state, 'moves_enabled', True),
+                    'values_enabled': getattr(self.game_state, 'values_enabled', True)
+                }
                 self._render_settings(self.background_name, scoring_factors)
 
         pygame.display.flip()
@@ -553,15 +509,10 @@ class Renderer:
         title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 60))
         self.screen.blit(title, title_rect)
 
-        # Get current scoring mode name from scoring_engine if available
-        if self.scoring_engine:
-            time_enabled = self.scoring_engine.time_enabled
-            moves_enabled = self.scoring_engine.moves_enabled
-            values_enabled = self.scoring_engine.values_enabled
-        else:
-            time_enabled = getattr(self.game_state, 'time_enabled', True)
-            moves_enabled = getattr(self.game_state, 'moves_enabled', True)
-            values_enabled = getattr(self.game_state, 'values_enabled', True)
+        # Get current scoring mode name from game state
+        time_enabled = getattr(self.game_state, 'time_enabled', True)
+        moves_enabled = getattr(self.game_state, 'moves_enabled', True)
+        values_enabled = getattr(self.game_state, 'values_enabled', True)
         mode_name = get_scoring_mode_name(time_enabled, moves_enabled, values_enabled)
 
         mode_text = self.small_font.render(f"Mode: {mode_name}", True, (180, 180, 180))
@@ -650,10 +601,8 @@ class Renderer:
         spacing = 150
         start_x = (SCREEN_WIDTH - (len(bg_options) * spacing - (spacing - swatch_size))) // 2
 
-        # Store rects for click detection in ui_state
-        if self.ui_state:
-            # Clear previous rects
-            self.ui_state.bg_swatch_rects.clear()
+        # Store rects for click detection (stored in renderer for access by main.py)
+        self.bg_swatch_rects = {}
 
         for i, (bg_key, bg_name, color) in enumerate(bg_options):
             x = start_x + i * spacing
@@ -686,13 +635,7 @@ class Renderer:
             self.screen.blit(label, label_rect)
 
             # Store rect for click detection
-            if self.ui_state:
-                self.ui_state.set_bg_swatch_rect(bg_key, swatch_rect)
-            else:
-                # Legacy: store directly on renderer for backward compatibility
-                if not hasattr(self, 'bg_swatch_rects'):
-                    self.bg_swatch_rects = {}
-                self.bg_swatch_rects[bg_key] = swatch_rect
+            self.bg_swatch_rects[bg_key] = swatch_rect
 
         # Pile outline color section
         y_offset = 350
@@ -714,9 +657,8 @@ class Renderer:
         pile_spacing = 120
         pile_start_x = (SCREEN_WIDTH - (len(pile_options) * pile_spacing - (pile_spacing - pile_swatch_size))) // 2
 
-        # Store rects for click detection in ui_state
-        if self.ui_state:
-            self.ui_state.pile_outline_rects.clear()
+        # Store rects for click detection
+        self.pile_outline_rects = {}
 
         for i, (pile_key, pile_name, color) in enumerate(pile_options):
             x = pile_start_x + i * pile_spacing
@@ -736,13 +678,7 @@ class Renderer:
             self.screen.blit(label, label_rect)
 
             # Store rect for click detection
-            if self.ui_state:
-                self.ui_state.set_pile_outline_rect(pile_key, pile_swatch_rect)
-            else:
-                # Legacy: store directly on renderer
-                if not hasattr(self, 'pile_outline_rects'):
-                    self.pile_outline_rects = {}
-                self.pile_outline_rects[pile_key] = pile_swatch_rect
+            self.pile_outline_rects[pile_key] = pile_swatch_rect
 
         # Scoring factors section
         y_offset = 540
@@ -767,9 +703,7 @@ class Renderer:
         label_spacing = 200
         start_x = (SCREEN_WIDTH - (3 * label_spacing)) // 2
 
-        # Store rects for click detection in ui_state
-        if self.ui_state:
-            self.ui_state.scoring_factor_rects.clear()
+        self.scoring_factor_rects = {}
 
         factors = [
             ('time_enabled', 'Time Bonus'),
@@ -804,13 +738,7 @@ class Renderer:
 
             # Store rect for click detection (include label for easier clicking)
             extended_rect = pygame.Rect(x, y_offset, label_spacing - 20, checkbox_size)
-            if self.ui_state:
-                self.ui_state.set_scoring_factor_rect(factor_key, extended_rect)
-            else:
-                # Legacy: store directly on renderer
-                if not hasattr(self, 'scoring_factor_rects'):
-                    self.scoring_factor_rects = {}
-                self.scoring_factor_rects[factor_key] = extended_rect
+            self.scoring_factor_rects[factor_key] = extended_rect
 
         # Purge scores button
         y_offset += 100
@@ -818,21 +746,14 @@ class Renderer:
         purge_button_height = 40
         purge_x = (SCREEN_WIDTH - purge_button_width) // 2
 
-        purge_button_rect = pygame.Rect(purge_x, y_offset, purge_button_width, purge_button_height)
+        self.purge_button_rect = pygame.Rect(purge_x, y_offset, purge_button_width, purge_button_height)
         purge_bg_color = (100, 30, 30)  # Dark red
-        pygame.draw.rect(self.screen, purge_bg_color, purge_button_rect)
-        pygame.draw.rect(self.screen, (200, 100, 100), purge_button_rect, 2)
+        pygame.draw.rect(self.screen, purge_bg_color, self.purge_button_rect)
+        pygame.draw.rect(self.screen, (200, 100, 100), self.purge_button_rect, 2)
 
         purge_text = self.small_font.render("Clear All Scores", True, WHITE)
-        purge_text_rect = purge_text.get_rect(center=purge_button_rect.center)
+        purge_text_rect = purge_text.get_rect(center=self.purge_button_rect.center)
         self.screen.blit(purge_text, purge_text_rect)
-
-        # Store rect for click detection
-        if self.ui_state:
-            self.ui_state.set_purge_button_rect(purge_button_rect)
-        else:
-            # Legacy: store directly on renderer
-            self.purge_button_rect = purge_button_rect
 
         # Warning text
         warning_text = self.small_font.render("(This cannot be undone!)", True, (180, 100, 100))
@@ -869,11 +790,7 @@ class Renderer:
             text_rect = text.get_rect(center=button_rect.center)
             self.screen.blit(text, text_rect)
 
-            # Store rect for click detection
-            if self.ui_state:
-                self.ui_state.set_menu_button_rect(option, button_rect)
-            else:
-                # Legacy: attach to menu_state for backward compatibility
-                if not hasattr(menu_state, 'button_rects'):
-                    menu_state.button_rects = {}
-                menu_state.button_rects[option] = button_rect
+            # Store rect for click detection (attach to menu_state for later)
+            if not hasattr(menu_state, 'button_rects'):
+                menu_state.button_rects = {}
+            menu_state.button_rects[option] = button_rect
