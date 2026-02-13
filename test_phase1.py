@@ -4,22 +4,26 @@
 import pygame
 pygame.init()
 
-from game_state import GameState
+from game_board import GameBoard
 from pile import FoundationPile, WastePile
+from scoring_engine import ScoringEngine
+from undo_redo_manager import UndoRedoManager
 
 def test_undo_redo_scoring():
     """Test that undo/redo correctly restores scores."""
     print("\n=== Testing Undo/Redo Scoring Fix ===")
 
-    gs = GameState()
+    scoring_engine = ScoringEngine()
+    gs = GameBoard(scoring_engine)
+    undo_manager = UndoRedoManager(gs, scoring_engine)
+    gs.set_undo_manager(undo_manager)
     gs.initialize_game()
 
     # Enable value scoring
-    gs.values_enabled = True
-    gs.scoring_config['value_enabled'] = True
+    scoring_engine.values_enabled = True
 
-    print(f"Initial score: {gs.move_value_score}")
-    assert gs.move_value_score == 0, "Initial score should be 0"
+    print(f"Initial score: {scoring_engine.move_value_score}")
+    assert scoring_engine.move_value_score == 0, "Initial score should be 0"
 
     # Find a card to move to foundation (Ace)
     ace = None
@@ -56,25 +60,25 @@ def test_undo_redo_scoring():
             success = gs.try_move([ace], source_pile, foundation)
 
             if success:
-                score_after = gs.move_value_score
+                score_after = scoring_engine.move_value_score
                 print(f"Score after move: {score_after}")
                 assert score_after > 0, "Score should increase after moving to foundation"
 
                 # Test undo
                 print("\nUndoing move...")
-                undo_success = gs.undo()
+                undo_success = undo_manager.undo()
                 assert undo_success, "Undo should succeed"
 
-                score_after_undo = gs.move_value_score
+                score_after_undo = scoring_engine.move_value_score
                 print(f"Score after undo: {score_after_undo}")
                 assert score_after_undo == 0, f"Score should be restored to 0, got {score_after_undo}"
 
                 # Test redo
                 print("\nRedoing move...")
-                redo_success = gs.redo()
+                redo_success = undo_manager.redo()
                 assert redo_success, "Redo should succeed"
 
-                score_after_redo = gs.move_value_score
+                score_after_redo = scoring_engine.move_value_score
                 print(f"Score after redo: {score_after_redo}")
                 assert score_after_redo == score_after, f"Score should be restored to {score_after}, got {score_after_redo}"
 
@@ -88,16 +92,17 @@ def test_sage_advice_loading():
     """Test that sage advice loads from JSON."""
     print("\n=== Testing Sage Advice Loading ===")
 
-    gs = GameState()
+    from sage_advice import SageAdviceSystem
+    sa = SageAdviceSystem()
 
     # Check that sage wisdom is loaded
-    total_wisdom = sum(len(category) for category in gs._sage_wisdom.values())
+    total_wisdom = sum(len(category) for category in sa._wisdom.values())
     print(f"Loaded {total_wisdom} pieces of wisdom from JSON")
     assert total_wisdom > 0, "Sage wisdom should be loaded"
     assert total_wisdom == 82, f"Expected 82 items, got {total_wisdom}"
 
     # Test getting advice
-    advice = gs.get_sage_advice()
+    advice = sa.get_random_advice()
     print(f"Sample advice: '{advice}'")
     assert len(advice) > 0, "Should get non-empty advice"
 
@@ -111,7 +116,8 @@ def test_gradient_caching():
     from renderer import Renderer
 
     screen = pygame.display.set_mode((800, 600))
-    gs = GameState()
+    scoring_engine = ScoringEngine()
+    gs = GameBoard(scoring_engine)
     renderer = Renderer(screen, gs)
 
     # Check cache exists
@@ -152,7 +158,8 @@ def test_backward_compatibility():
         # Note: no 'score_delta' field
     }
 
-    gs = GameState()
+    scoring_engine = ScoringEngine()
+    gs = GameBoard(scoring_engine)
     gs.initialize_game()
 
     # Try to deserialize old format

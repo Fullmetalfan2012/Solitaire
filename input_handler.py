@@ -7,13 +7,13 @@ from pile import Pile
 from constants import CARD_OVERLAP_Y
 
 if TYPE_CHECKING:
-    from game_state import GameState
+    from game_board import GameBoard
 
 
 class InputHandler:
     """Handles all mouse input and drag-and-drop logic."""
 
-    def __init__(self, game_state: 'GameState'):
+    def __init__(self, game_state: 'GameBoard'):
         """
         Initialize input handler.
 

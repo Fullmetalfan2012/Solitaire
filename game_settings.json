@@ -1,6 +1,6 @@
 {
-  "background_color": "gradient_sunset",
-  "pile_outline_color": "gold",
+  "background_color": "gradient_ocean",
+  "pile_outline_color": "red",
   "time_enabled": true,
   "moves_enabled": true,
   "values_enabled": true,

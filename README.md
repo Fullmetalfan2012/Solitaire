@@ -2,8 +2,6 @@
 
 A modern, feature-rich Klondike Solitaire game built with pygame, designed for extensibility and polish.
 
-**Current Status**: Phase 2 Complete! ✨ Full-featured game with professional UX, ready for Phase 3 (special abilities).
-
 ---
 
 ## ✨ Features

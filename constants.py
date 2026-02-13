@@ -55,6 +55,24 @@ PILE_OUTLINE_COLORS = {
 # Game settings
 FPS = 60
 
+# Animation
+AUTO_FINISH_ANIMATION_DURATION = 0.3  # seconds
+CARD_ANIMATION_ARC_HEIGHT = 100       # pixels
+HINT_PULSE_ALPHA_MIN = 128
+HINT_PULSE_ALPHA_MAX = 255
+
+# UI Layout
+SCORE_INFO_X = 350
+SCORE_INFO_Y = 10
+HINT_INFO_Y = 40
+UI_MARGIN = 20
+TOP_SCORES_LIMIT = 10
+
+# Rendering
+FONT_SIZE_LARGE = 48
+FONT_SIZE_SMALL = 24
+OVERLAY_ALPHA = 128
+
 # Toggle-based scoring system
 # Players can enable/disable each factor independently
 DEFAULT_SCORING_FACTORS = {
