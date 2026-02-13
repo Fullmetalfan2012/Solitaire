@@ -12,3 +12,8 @@ wheels/
 # Game data
 scores.jsonl
 savegame.json
+
+# Claude
+**/*.md
+!/README.md
+!/PLAYTEST_INSTRUCTIONS.md
