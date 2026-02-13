@@ -58,6 +58,10 @@ class GameState:
         self.sage_advice_text: Optional[str] = None
         self.sage_advice_timer: float = 0.0
 
+        # Load sage advice from JSON
+        self._sage_wisdom: Dict[str, List[str]] = {}
+        self._load_sage_advice()
+
         # Auto-finish system
         self.auto_finish_available: bool = False
         self.auto_finishing: bool = False
@@ -65,6 +69,17 @@ class GameState:
         self.auto_finish_source: Optional[Pile] = None
         self.auto_finish_target: Optional[Pile] = None
         self.auto_finish_start_time: float = 0.0
+
+    def _load_sage_advice(self):
+        """Load sage advice from JSON file."""
+        try:
+            advice_path = os.path.join(os.path.dirname(__file__), 'data', 'sage_advice.json')
+            with open(advice_path, 'r') as f:
+                self._sage_wisdom = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"Warning: Could not load sage advice: {e}")
+            # Fallback to empty dict
+            self._sage_wisdom = {}
 
     def initialize_game(self):
         """Set up a new game with shuffled deck."""
@@ -220,17 +235,19 @@ class GameState:
                 # A card was flipped - track it for undo
                 revealed_card = source.cards[-1] if source.cards else None
 
+        # Calculate score change for this move (before updating score)
+        score_before = self.move_value_score
+        self.record_move(source, target, cards, revealed_card is not None)
+        score_delta = self.move_value_score - score_before
+
         # Create and store move for undo/redo
         # Clear any "future" moves if we're in the middle of history
         if self.current_move_index < len(self.move_history):
             self.move_history = self.move_history[:self.current_move_index]
 
-        move = Move(source, target, cards, revealed_card)
+        move = Move(source, target, cards, revealed_card, score_delta=score_delta)
         self.move_history.append(move)
         self.current_move_index = len(self.move_history)
-
-        # Record the move for scoring
-        self.record_move(source, target, cards, revealed_card is not None)
 
         return True
 
@@ -493,6 +510,9 @@ class GameState:
         for pile in self.all_piles:
             pile.update_card_positions()
 
+        # Restore score to previous value
+        self.move_value_score -= move.score_delta
+
         # Decrement move count (if it was a scored move, not stock draw)
         # We'll need to track this better, but for now just decrement if > 0
         if self.move_count > 0:
@@ -515,6 +535,9 @@ class GameState:
 
         # Re-execute the move
         move.execute()
+
+        # Reapply score change
+        self.move_value_score += move.score_delta
 
         # Increment move count
         self.move_count += 1
@@ -595,101 +618,16 @@ class GameState:
         Returns:
             Random useless animal wisdom
         """
-        import random
+        if not self._sage_wisdom:
+            return "No wisdom available. The universe is silent."
 
-        advice_pool = [
-            # Cat wisdom
-            "A cat's whisker is exactly as wide as its body",
-            "Cats sleep 70% of their lives - they're living the dream",
-            "Cats have three eyelids. You only have two. Think about that.",
-            "A group of cats is called a 'clowder'. This won't help you win.",
-            "Cats can rotate their ears 180 degrees. Solitaire cards cannot.",
-            "Ancient Egyptians worshipped cats. They didn't worship Solitaire players.",
-            "Cats have 32 muscles in each ear. You have 52 cards. Coincidence?",
-            "Cats can't taste sweetness. Much like this losing streak.",
-            "A cat's purr vibrates at 25-150 Hz. That's the frequency of your frustration.",
-            "Cats spend 30-50% of their day grooming. You spend that much staring at cards.",
-            "A cat's brain is 90% similar to a human's. They'd still play better.",
-            "Cats can jump up to 6 times their height. Your win rate can't jump at all.",
-            "A cat's meow is specifically for humans. This loss is specifically for you.",
-            "Cats have a third eyelid that shows when they're unwell. Check your strategy.",
-            "Cats can make over 100 vocal sounds. You're making sounds of defeat.",
-            "A cat's jaw can't move sideways. Neither can your progress in this game.",
-            "Cats' collarbones don't connect to other bones. Your cards don't connect either.",
-            "Cats have fewer toes on their back paws than front. Asymmetry, like your luck.",
-            "A cat's heart beats 110-140 times per minute. Faster with each wrong move.",
-            "Cats can run up to 30 mph. Still slower than your losing streak.",
+        # Flatten all wisdom categories into one pool
+        all_wisdom = [advice for category in self._sage_wisdom.values() for advice in category]
 
-            # Dog wisdom
-            "Dogs have wet noses to absorb scent chemicals. This is irrelevant.",
-            "A dog's sense of smell is 40x better than yours. They'd still lose at Solitaire.",
-            "Dalmatians are born completely white. Just like your winning chances.",
-            "Dogs can hear sounds four times farther than humans. They still can't help you.",
-            "A dog's nose print is unique, like a fingerprint. Unlike your strategy.",
-            "Puppies are born deaf, blind, and toothless. Sound familiar?",
-            "Dogs have three eyelids. One more than your viable moves.",
-            "A dog's shoulder blades are unattached. Like your grip on this game.",
-            "Dogs can smell your feelings. Right now? Desperation.",
-            "Greyhounds can beat cheetahs in long-distance races. You can't beat anything.",
-            "Dogs have 18 muscles in each ear. You have 52 cards you can't play.",
-            "A dog's sense of time is based on routine. Your routine is losing.",
-            "Dogs dream just like humans. They dream of better Solitaire players.",
-            "Dogs have 42 adult teeth. You have 42 problems and this game is all of them.",
-            "A dog can locate a sound in 6/100ths of a second. You can't find a move in 6 minutes.",
-            "Dogs' paws smell like corn chips. Your strategy smells like despair.",
-            "Service dogs can predict seizures. They predict you'll lose this game.",
-            "Dogs have a 'third eyelid' for protection. You need protection from this game.",
-            "Bloodhounds can track scents over 300 hours old. Your mistakes are fresher.",
-            "Dogs sweat through their paws. You're sweating through everything else.",
+        if not all_wisdom:
+            return "No wisdom available. The universe is silent."
 
-            # Bird wisdom
-            "Hummingbirds can fly backwards. Your undo button does the same thing.",
-            "Owls can't move their eyeballs. At least you can look away from this mess.",
-            "Ostriches have the largest eyes of any land animal. They'd see this coming.",
-            "Crows can recognize human faces. They're judging your moves right now.",
-            "Penguins propose with pebbles. You're proposing nothing but chaos.",
-            "Pigeons can do math. They're laughing at your card counting.",
-            "Hummingbirds' hearts beat 1,200 times per minute. Yours beats in panic.",
-            "Owls can rotate their heads 270 degrees. You can't rotate your luck 1 degree.",
-            "Penguins can hold their breath for 20 minutes. You should try holding this game.",
-            "Crows can hold grudges for years. This game holds grudges for seconds.",
-            "A woodpecker pecks 20 times per second. That's how often you make mistakes.",
-            "Chickens can remember over 100 faces. They remember your failures.",
-            "Parrots can live to 80 years. This game feels like it's taken that long.",
-            "Eagles can see 8 times farther than humans. They see no hope for you.",
-            "Flamingos can sleep standing on one leg. You can't win standing on two.",
-            "Ostriches can run 45 mph. Your winning chances run even faster away.",
-            "Albatrosses can fly for years without landing. Your losing streak also never lands.",
-            "Robins can detect worms by sound. You can't detect winning moves by sight.",
-            "Peacocks' tail feathers can reach 5 feet. Your card stacks reach nowhere.",
-            "Swifts spend 10 months flying without landing. You spend months without winning.",
-            "Kiwi birds are flightless and nearly blind. They'd still beat you.",
-
-            # Mouse wisdom
-            "Mice can fit through holes the size of a pencil. You can't fit through this puzzle.",
-            "A mouse's heart beats 632 times per minute. Yours might too, with this game.",
-            "Mice are excellent jumpers and climbers. Cards aren't. That's your problem.",
-            "A mouse can live without water longer than a camel. Still shorter than this game.",
-            "Mice whiskers detect changes in air flow. Your losing streak changes nothing.",
-            "Mice teeth never stop growing. Neither does your card pile, apparently.",
-            "Mice can squeeze through a hole the size of a dime. You can't squeeze out a win.",
-            "A mouse's tail is as long as its body. Your game is as long as your patience.",
-            "Mice are nocturnal. Your winning chances are also in the dark.",
-            "House mice can run up to 8 mph. Your progress moves backwards.",
-            "Mice can fall 8 feet without injury. You fall at every move without help.",
-            "A mouse's heart rate can reach 840 bpm when stressed. Relatable, isn't it?",
-            "Mice are omnivores. Your strategy is omni-terrible.",
-            "Mice have poor eyesight but great hearing. You have neither for this game.",
-            "A mouse's pregnancy lasts 19-21 days. This game feels longer.",
-            "Mice can sense temperature changes through whiskers. Feel that chill? It's defeat.",
-            "Mice are social creatures living in groups. You're alone in this struggle.",
-            "Mice can swim for up to 3 days. You're drowning in cards already.",
-            "A mouse can produce 50-60 offspring per year. Your mistakes multiply faster.",
-            "Mice groom themselves for hours daily. No amount of grooming will fix this mess.",
-            "Mice communicate through ultrasonic vocalizations. Your sighs are more audible."
-        ]
-
-        return random.choice(advice_pool)
+        return random.choice(all_wisdom)
 
     def show_sage_advice(self):
         """Display sage advice on screen for a few seconds."""
